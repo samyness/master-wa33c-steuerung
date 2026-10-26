@@ -8,6 +8,20 @@ Den vollständigen technischen Auftrag findest du in [docs/CLAUDE.md](docs/CLAUD
 > nur, wenn ein Mensch am Ofen angezündet und am Display (oder im Webinterface mit Bestätigung) „Start“ gedrückt hat.
 > Nach Stromausfall, Neustart oder Alarm steht die Pumpe immer.
 
+## So sieht das Display aus
+
+| Übersicht | Verlauf 24 h |
+| --- | --- |
+| ![Übersicht](docs/screenshots/uebersicht.png) | ![Verlauf](docs/screenshots/verlauf.png) |
+| **Start-Dialog** | **Alarm** |
+| ![Start](docs/screenshots/start.png) | ![Alarm](docs/screenshots/alarm.png) |
+| **Kalibrierung: Bestätigung Pumpe** | |
+| ![Kalibrierung](docs/screenshots/kalibrierung.png) | |
+
+*Gerenderte Vorschau mit Beispieldaten, keine Fotos vom Gerät: Positionen, Farben und Schriften stammen aus
+`ofen-display.yaml`, das echte LVGL-Bild kann in Details abweichen. Neu erzeugen mit
+`python docs/screenshots/render.py`.*
+
 ## Aufbau in einem Satz
 
 Der **NodeMCU** (Ofen-Controller) misst Sicherheitskette, Lüfter und Abgas und entscheidet allein über die Pumpe.
