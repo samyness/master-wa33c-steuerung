@@ -1,0 +1,9 @@
+.venv/
+.esphome/
+secrets.yaml
+build/
+test/build/
+*.exe
+*.obj
+*.pdb
+__pycache__/

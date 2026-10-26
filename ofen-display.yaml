@@ -1,0 +1,537 @@
+substitutions:
+  ntfy_topic: !secret ntfy_topic
+  ntfy_url: "https://ntfy.sh/${ntfy_topic}"
+
+esphome:
+  name: ofen-display
+  friendly_name: Ofen-Display
+  includes: [components/ofen_link/ofen_display.h]
+  build_flags: ["-DLV_USE_CHART=1"]
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          auto &d=esphome::ofen_link::display_runtime;
+          d.regler.kp=id(kp).state; d.regler.ti_min=id(ti).state;
+          d.programm.absenkung=id(absenkung).state;
+          esphome::text::Text *t[7]={id(prog_mo),id(prog_di),id(prog_mi),id(prog_do),id(prog_fr),id(prog_sa),id(prog_so)};
+          for(int i=0;i<7;i++) d.set_tag(i,t[i]->state);
+
+esp32:
+  board: esp32-s3-devkitc-1
+  flash_size: 16MB
+  framework: {type: esp-idf}
+psram: {mode: octal, speed: 80MHz}
+logger:
+
+wifi:
+  networks:
+    - ssid: !secret wifi_ssid
+      password: !secret wifi_password
+      channel: !secret wifi_channel
+  reboot_timeout: 0s
+  power_save_mode: none
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+web_server:
+  version: 3
+  auth: {type: digest, username: !secret web_username, password: !secret web_password}
+  sorting_groups:
+    - {id: web_status, name: Ofenstatus, sorting_weight: 10}
+    - {id: web_bedienung, name: "Bedienung – Start nur nach Anzünden vor Ort", sorting_weight: 20}
+    - {id: web_einstellung, name: Einstellungen, sorting_weight: 30}
+
+http_request: {id: ntfy_http, timeout: 8s, verify_ssl: true}
+external_components:
+  - source: {type: local, path: components}
+time:
+  - {platform: sntp, id: netzzeit, timezone: Europe/Vienna}
+i2c: {sda: GPIO8, scl: GPIO9, frequency: 400kHz}
+ch422g:
+  - id: io_expander
+
+display:
+  - platform: mipi_rgb
+    model: ESP32-S3-TOUCH-LCD-7-800X480
+    id: display_panel
+    update_interval: never
+    auto_clear_enabled: false
+touchscreen:
+  - platform: gt911
+    id: touch_panel
+    display: display_panel
+    interrupt_pin: GPIO4
+    reset_pin: {ch422g: io_expander, number: 1}
+    on_touch:
+      - lvgl.resume:
+
+font:
+  - {file: "gfonts://Roboto", id: schrift_24, size: 24, glyphsets: [GF_Latin_Kernel], glyphs: "äöüÄÖÜß°–…×àé·"}
+  - {file: {type: gfonts, family: Roboto, weight: 700}, id: schrift_36, size: 36, glyphsets: [GF_Latin_Kernel], glyphs: "äöüÄÖÜß°–…×àé·"}
+  - {file: {type: gfonts, family: Roboto, weight: 700}, id: schrift_60, size: 60, glyphsets: [GF_Latin_Kernel], glyphs: "äöüÄÖÜß°–…×àé·"}
+
+uart:
+  - {id: rs485_uart, tx_pin: GPIO16, rx_pin: GPIO15, baud_rate: 19200, data_bits: 8, parity: NONE, stop_bits: 1}
+ofen_link: {id: ofen_bus, uart_id: rs485_uart}
+
+espnow:
+  peers: [!secret raumfuehler_mac]
+packet_transport:
+  - platform: espnow
+    providers:
+      - {name: raumfuehler, encryption: !secret transport_key}
+
+globals:
+  - {id: web_angezuendet, type: bool, restore_value: false, initial_value: 'false'}
+  - {id: betriebsstunden, type: float, restore_value: true, initial_value: '0'}  # seit Tellerreinigung
+  - {id: letzter_alarm_push, type: int, restore_value: false, initial_value: '0'}
+  - {id: raum_push_gesendet, type: bool, restore_value: false, initial_value: 'false'}
+  - {id: pin_freigabe_bis, type: uint32_t, restore_value: false, initial_value: '0'}
+
+number:
+  - platform: template
+    id: sollwert
+    name: Raum-Sollwert
+    unit_of_measurement: °C
+    min_value: 5
+    max_value: 28
+    step: 0.5
+    restore_value: true
+    optimistic: true
+    initial_value: 20
+    web_server: {sorting_group_id: web_bedienung, sorting_weight: 10}
+  - platform: template
+    id: absenkung
+    name: Absenktemperatur
+    unit_of_measurement: °C
+    min_value: 5
+    max_value: 20
+    step: 0.5
+    restore_value: true
+    optimistic: true
+    initial_value: 12
+    web_server: {sorting_group_id: web_einstellung, sorting_weight: 10}
+  - platform: template
+    id: kp
+    name: Regler Kp
+    min_value: 1
+    max_value: 100
+    step: 0.5
+    restore_value: true
+    optimistic: true
+    initial_value: 20
+    web_server: {sorting_group_id: web_einstellung, sorting_weight: 20}
+  - platform: template
+    id: ti
+    name: Regler Ti
+    unit_of_measurement: min
+    min_value: 1
+    max_value: 240
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 30
+    web_server: {sorting_group_id: web_einstellung, sorting_weight: 21}
+  - platform: template
+    id: oeldichte
+    name: Öldichte
+    unit_of_measurement: kg/l
+    min_value: 0.7
+    max_value: 1.1
+    step: 0.01
+    restore_value: true
+    optimistic: true
+    initial_value: 0.85
+    web_server: {sorting_group_id: web_einstellung, sorting_weight: 30}
+  - platform: template
+    id: pin_code
+    name: Einstellungs-PIN
+    min_value: 0
+    max_value: 9999
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 1234
+    entity_category: config
+    web_server: {sorting_group_id: web_einstellung, sorting_weight: 90}
+  - platform: template
+    id: screensaver_min
+    name: Bildschirmschoner
+    unit_of_measurement: min
+    min_value: 1
+    max_value: 60
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 10
+    web_server: {sorting_group_id: web_einstellung, sorting_weight: 41}
+  - platform: template
+    id: kal_ml
+    name: Gemessene Ölmenge
+    unit_of_measurement: ml
+    min_value: 0
+    max_value: 2000
+    step: 1
+    optimistic: true
+    initial_value: 0
+    internal: true
+
+text:
+  - {platform: template, id: prog_mo, name: "Zeitprogramm Mo", mode: text, optimistic: true, restore_value: true, initial_value: "", max_length: 64, web_server: {sorting_group_id: web_einstellung, sorting_weight: 6}, on_value: [{lambda: 'esphome::ofen_link::display_runtime.set_tag(0,x);'}]}
+  - {platform: template, id: prog_di, name: "Zeitprogramm Di", mode: text, optimistic: true, restore_value: true, initial_value: "", max_length: 64, web_server: {sorting_group_id: web_einstellung, sorting_weight: 7}, on_value: [{lambda: 'esphome::ofen_link::display_runtime.set_tag(1,x);'}]}
+  - {platform: template, id: prog_mi, name: "Zeitprogramm Mi", mode: text, optimistic: true, restore_value: true, initial_value: "", max_length: 64, web_server: {sorting_group_id: web_einstellung, sorting_weight: 8}, on_value: [{lambda: 'esphome::ofen_link::display_runtime.set_tag(2,x);'}]}
+  - {platform: template, id: prog_do, name: "Zeitprogramm Do", mode: text, optimistic: true, restore_value: true, initial_value: "", max_length: 64, web_server: {sorting_group_id: web_einstellung, sorting_weight: 9}, on_value: [{lambda: 'esphome::ofen_link::display_runtime.set_tag(3,x);'}]}
+  - {platform: template, id: prog_fr, name: "Zeitprogramm Fr", mode: text, optimistic: true, restore_value: true, initial_value: "", max_length: 64, web_server: {sorting_group_id: web_einstellung, sorting_weight: 10}, on_value: [{lambda: 'esphome::ofen_link::display_runtime.set_tag(4,x);'}]}
+  - {platform: template, id: prog_sa, name: "Zeitprogramm Sa", mode: text, optimistic: true, restore_value: true, initial_value: "", max_length: 64, web_server: {sorting_group_id: web_einstellung, sorting_weight: 11}, on_value: [{lambda: 'esphome::ofen_link::display_runtime.set_tag(5,x);'}]}
+  - {platform: template, id: prog_so, name: "Zeitprogramm So", mode: text, optimistic: true, restore_value: true, initial_value: "", max_length: 64, web_server: {sorting_group_id: web_einstellung, sorting_weight: 12}, on_value: [{lambda: 'esphome::ofen_link::display_runtime.set_tag(6,x);'}]}
+
+switch:
+  - platform: template
+    id: zeitprogramm_an
+    name: Wochenprogramm
+    restore_mode: RESTORE_DEFAULT_OFF
+    optimistic: true
+    web_server: {sorting_group_id: web_einstellung, sorting_weight: 5}
+  - platform: template
+    id: ntfy_an
+    name: Push-Nachrichten
+    restore_mode: RESTORE_DEFAULT_ON
+    optimistic: true
+    web_server: {sorting_group_id: web_einstellung, sorting_weight: 50}
+  - platform: template
+    id: web_start_bestaetigung
+    name: Ofen vor Ort angezündet
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    turn_on_action: [{lambda: 'id(web_angezuendet)=true;'}]
+    turn_off_action: [{lambda: 'id(web_angezuendet)=false;'}]
+    web_server: {sorting_group_id: web_bedienung, sorting_weight: 20}
+
+sensor:
+  - {platform: wifi_signal, id: wlan_rssi, name: WLAN-Signal, update_interval: 60s, web_server: {sorting_group_id: web_status, sorting_weight: 90}}
+  - platform: packet_transport
+    provider: raumfuehler
+    remote_id: raumtemperatur
+    id: raum_temp
+    name: Raumtemperatur
+    internal: false
+    unit_of_measurement: °C
+    device_class: temperature
+    state_class: measurement
+    on_value:
+      - lambda: |-
+          auto &d=esphome::ofen_link::display_runtime;
+          d.letzter_raum_ms=millis(); d.raum_warnung=false; id(raum_push_gesendet)=false;
+    web_server: {sorting_group_id: web_status, sorting_weight: 20}
+  - platform: template
+    id: abgas_web
+    name: Abgastemperatur
+    unit_of_measurement: °C
+    device_class: temperature
+    update_interval: never
+    web_server: {sorting_group_id: web_status, sorting_weight: 30}
+  - platform: template
+    id: leistung_web
+    name: Leistung
+    unit_of_measurement: kW
+    update_interval: never
+    web_server: {sorting_group_id: web_status, sorting_weight: 40}
+  - platform: template
+    id: reinigungsstunden
+    name: Betriebsstunden seit Tellerreinigung
+    unit_of_measurement: h
+    accuracy_decimals: 1
+    update_interval: 60s
+    lambda: return id(betriebsstunden);
+    web_server: {sorting_group_id: web_status, sorting_weight: 50}
+
+text_sensor:
+  - platform: template
+    id: zustand_web
+    name: Zustand
+    update_interval: never
+    web_server: {sorting_group_id: web_status, sorting_weight: 10}
+  - platform: template
+    name: Controller-Verbindung
+    update_interval: 2s
+    lambda: return id(ofen_bus).status_fresh(5000)?std::string("verbunden"):std::string("VERBINDUNGSFEHLER");
+    web_server: {sorting_group_id: web_status, sorting_weight: 11}
+  - platform: template
+    name: Wichtiger Starthinweis
+    update_interval: never
+    lambda: return {"Start wirkt nur nach manuellem Anzünden vor Ort und gesetzter Bestätigung."};
+    web_server: {sorting_group_id: web_bedienung, sorting_weight: 1}
+
+button:
+  - platform: template
+    id: web_start
+    name: START – angezündet und bestätigt
+    on_press:
+      - lambda: |-
+          auto &d=esphome::ofen_link::display_runtime;
+          if(id(web_angezuendet)&&d.start_erlaubt(id(ofen_bus).status,id(ofen_bus).status_fresh(5000))) id(ofen_bus).send_cmd('C',"START");
+          else d.meldung=id(web_angezuendet)?d.startsperre(id(ofen_bus).status,id(ofen_bus).status_fresh(5000)):"Bestätigung fehlt";
+          id(web_angezuendet)=false; id(web_start_bestaetigung).turn_off();
+    web_server: {sorting_group_id: web_bedienung, sorting_weight: 30}
+  - platform: template
+    id: stopp
+    name: STOPP
+    on_press: [{lambda: 'id(ofen_bus).send_cmd(''C'',"STOP");'}]
+    web_server: {sorting_group_id: web_bedienung, sorting_weight: 40}
+  - platform: template
+    id: reinigung_reset
+    name: Tellerreinigung jetzt zurücksetzen
+    on_press: [{lambda: 'id(betriebsstunden)=0;'}]
+    web_server: {sorting_group_id: web_einstellung, sorting_weight: 60}
+
+script:
+  - id: push
+    parameters: {titel: string, nachricht: string}
+    then:
+      - if:
+          condition: {switch.is_on: ntfy_an}
+          then:
+            - http_request.post:
+                url: ${ntfy_url}
+                request_headers:
+                  Title: !lambda return titel.c_str();
+                  Priority: high
+                  Content-Type: text/plain
+                body: !lambda return nachricht;
+
+interval:
+  - interval: 2s
+    then:
+      - lambda: |-
+          auto &d=esphome::ofen_link::display_runtime; ofen::HeartbeatMsg h;
+          h.seq=id(ofen_bus).next_seq(); h.leistung=lroundf(d.leistung_soll);
+          h.raum_c=id(raum_temp).has_state()&&!d.raum_warnung?id(raum_temp).state:NAN; h.soll_c=d.soll_c;
+          id(ofen_bus).send(ofen::encode(h));
+  - interval: 1s
+    then:
+      - lambda: |-
+          auto &bus=*id(ofen_bus); auto &d=esphome::ofen_link::display_runtime; bool frisch=bus.status_fresh(5000);
+          if(frisch){id(abgas_web).publish_state(bus.status.abgas_c);id(leistung_web).publish_state(bus.status.kw);id(zustand_web).publish_state(ofen::state_name((ofen::State)bus.status.state));}
+          if(frisch&&bus.status.state!=d.letzter_status_state){d.letzter_status_state=bus.status.state;if(bus.status.state==(long)ofen::State::BETRIEB)d.betrieb_seit_ms=millis();}
+          while(!bus.rx.empty()){auto a=bus.rx.front();bus.rx.pop_front();if(a.type=='A'&&a.name=="ERR"){long r=strtol(a.arg.c_str(),nullptr,10);d.meldung=std::string("Befehl abgelehnt: ")+ofen::reason_text((ofen::Reason)r);}}
+          if(millis()-d.letzter_raum_ms>600000UL)d.raum_warnung=true;
+          if(d.kal_abbrechen(bus.status,frisch,id(raum_temp).state,millis())){bus.send_cmd('C',"STOP");d.kal=esphome::ofen_link::DisplayRuntime::KalSchritt::AUS;d.meldung="Kalibrierung abgebrochen";}
+          if(d.kal==esphome::ofen_link::DisplayRuntime::KalSchritt::PUMPE&&!d.kal_wartet_ml&&millis()-d.stufe_start_ms>=180000UL){bus.send_cmd('C',"STOP");d.kal_wartet_ml=true;d.meldung="Menge eingeben und WERT SPEICHERN drücken";}
+          char b[180]; snprintf(b,sizeof(b),frisch?"%s%s":"VERBINDUNGSFEHLER – keine aktuellen Ofendaten",frisch?ofen::state_name((ofen::State)bus.status.state):"",(frisch&&bus.status.warn)?" – WARNUNG":"");lv_label_set_text(id(lbl_zustand),b);
+          if(id(raum_temp).has_state())snprintf(b,sizeof(b),"%.1f °C",id(raum_temp).state);else snprintf(b,sizeof(b),"--.- °C");lv_label_set_text(id(lbl_raum),b);
+          snprintf(b,sizeof(b),"Soll %.1f °C",d.soll_c);lv_label_set_text(id(lbl_soll),b);
+          snprintf(b,sizeof(b),"Abgas %.1f °C   Leistung %.1f kW",bus.status.abgas_c,bus.status.kw);lv_label_set_text(id(lbl_ofenwerte),b);
+          static const char *const kette[4]={"STB und Überlauf zu","Überlauf offen","STB offen / F3","Kettenfehler"};
+          snprintf(b,sizeof(b),"Kette: %s   Lüfter: %s",kette[bus.status.kette&3],bus.status.luefter?"AN":"AUS");lv_label_set_text(id(lbl_details),b);
+          if(frisch&&bus.status.anlauf_rest_s>0){snprintf(b,sizeof(b),"%s – noch %ld min",ofen::state_name((ofen::State)bus.status.state),(bus.status.anlauf_rest_s+59)/60);lv_label_set_text(id(lbl_zustand),b);}
+          // Zustandskachel: Stop grau, Anzünden/Anlauf orange, Betrieb grün, Auslöschen blau, Alarm rot
+          static const uint32_t farbe[7]={0x5C677D,0xE76F00,0xE76F00,0x2A9D3F,0x1D4ED8,0xC1121F,0x7B2CBF};
+          lv_obj_set_style_bg_color(id(lbl_zustand),lv_color_hex(frisch?farbe[bus.status.state%7]:0xC1121F),0);
+          lv_bar_set_value(id(leistung_bar),frisch&&bus.status.kw>0?lroundf(bus.status.kw*10):170,LV_ANIM_OFF);
+          snprintf(b,sizeof(b),"Tellerreinigung: %.1f h",id(betriebsstunden));lv_label_set_text(id(lbl_reinigung),b);
+          {auto n=id(netzzeit).now();std::string f=d.programm_an&&n.is_valid()?d.naechstes_fenster((n.day_of_week+5)%7,n.hour*60+n.minute):"";lv_label_set_text(id(lbl_fenster),f.empty()?"Zeitprogramm aus":("Nächste Heizzeit: "+f).c_str());}
+          {std::string empf=id(raum_temp).has_state()?std::to_string((millis()-d.letzter_raum_ms)/1000)+" s seit Empfang":"noch nichts empfangen";
+          snprintf(b,sizeof(b),"Funkfühler: %s\nWLAN: %s (%.0f dBm)",empf.c_str(),wifi::global_wifi_component->is_connected()?"verbunden":"getrennt",id(wlan_rssi).state);lv_label_set_text(id(lbl_info),b);}
+          lv_label_set_text(id(lbl_warnung),d.raum_warnung?"WARNUNG: Raumfühler fehlt seit mehr als 10 min":d.meldung.c_str());
+          if(frisch&&bus.status.state==(long)ofen::State::ALARM){lv_label_set_text(id(lbl_alarm),ofen::alarm_text((ofen::Alarm)bus.status.alarm));lv_label_set_text(id(lbl_alarm_hinweis),ofen::alarm_hint((ofen::Alarm)bus.status.alarm));}
+      - if:
+          condition: {lambda: 'return id(ofen_bus)->status_fresh(5000)&&id(ofen_bus)->status.state==(long)ofen::State::ALARM&&!id(alarm_seite)->is_showing();'}
+          then: [lvgl.resume:, {lvgl.page.show: alarm_seite}]
+      - if:
+          condition: {lambda: 'return id(alarm_seite)->is_showing()&&!(id(ofen_bus)->status_fresh(5000)&&id(ofen_bus)->status.state==(long)ofen::State::ALARM);'}
+          then: [{lvgl.page.show: uebersicht_seite}]
+      # Nach Quittierung darf derselbe Alarm wieder eine Push auslösen
+      - lambda: if(id(ofen_bus)->status_fresh(5000)&&id(ofen_bus)->status.state!=(long)ofen::State::ALARM) id(letzter_alarm_push)=0;
+      - if:
+          condition:
+            lambda: return id(ofen_bus).status_fresh(5000)&&id(ofen_bus).status.state==(long)ofen::State::ALARM&&id(ofen_bus).status.alarm!=id(letzter_alarm_push);
+          then:
+            - lambda: id(letzter_alarm_push)=id(ofen_bus).status.alarm;
+            - script.execute: {id: push, titel: Ofenalarm, nachricht: !lambda 'return ofen::alarm_text((ofen::Alarm)id(ofen_bus).status.alarm);'}
+      - if:
+          condition: {lambda: 'return esphome::ofen_link::display_runtime.raum_warnung&&!id(raum_push_gesendet);'}
+          then:
+            - lambda: id(raum_push_gesendet)=true;
+            - script.execute: {id: push, titel: Ofenwarnung, nachricht: Raumfühler fehlt seit mehr als 10 Minuten}
+  - interval: 30s
+    then:
+      - lambda: |-
+          auto &d=esphome::ofen_link::display_runtime;d.regler.kp=id(kp).state;d.regler.ti_min=id(ti).state;d.programm_an=id(zeitprogramm_an).state;
+          auto n=id(netzzeit).now();d.soll_c=d.programm_an&&n.is_valid()?d.programm.soll((n.day_of_week+5)%7,n.hour*60+n.minute):id(sollwert).state;
+          bool betrieb=id(ofen_bus).status_fresh(5000)&&id(ofen_bus).status.state==(long)ofen::State::BETRIEB;d.programm.absenkung=id(absenkung).state;
+          d.leistung_soll=d.regler.update(d.soll_c,id(raum_temp).state,30.f,betrieb);if(d.raum_warnung)d.leistung_soll=0;
+          using K=esphome::ofen_link::DisplayRuntime::KalSchritt;if(d.kal==K::FLAMME)d.leistung_soll=0;if(d.kal==K::SPRUNG)d.leistung_soll=100;
+  - interval: 60s
+    then:
+      - lambda: |-
+          auto &d=esphome::ofen_link::display_runtime;auto &s=id(ofen_bus).status;
+          if(id(ofen_bus).status_fresh(5000)&&s.state>=1&&s.state<=3) id(betriebsstunden)+=1.0f/60.0f;
+          if(d.kal==esphome::ofen_link::DisplayRuntime::KalSchritt::FLAMME){d.flamme_summe+=s.abgas_c;d.flamme_n++;if(d.flamme_n>=20){d.neu_flamme=ofen::flamme_aus_vorschlag(d.flamme_summe/d.flamme_n);d.kal=esphome::ofen_link::DisplayRuntime::KalSchritt::AUS;d.meldung="Flammengrenze berechnet – ÜBERNEHMEN drücken";}}
+          if(d.kal==esphome::ofen_link::DisplayRuntime::KalSchritt::SPRUNG&&d.sprung_n<91){d.leistung_soll=100;d.sprung_t[d.sprung_n]=d.sprung_n;d.sprung_y[d.sprung_n]=id(raum_temp).state;d.sprung_n++;if(d.sprung_n==91){d.sprung_ergebnis=ofen::sprung_auswerten(d.sprung_t.data(),d.sprung_y.data(),d.sprung_n,100);d.kal=esphome::ofen_link::DisplayRuntime::KalSchritt::AUS;d.meldung=d.sprung_ergebnis.ok?"Reglerwerte berechnet – ÜBERNEHMEN drücken":"Sprungversuch nicht auswertbar";}}
+      - if:
+          condition:
+            lambda: |-
+              auto &d=esphome::ofen_link::display_runtime;auto n=id(netzzeit).now();if(!d.programm_an||!n.is_valid())return false;
+              int tag=(n.day_of_week+5)%7,m=n.hour*60+n.minute;bool neu=d.programm.beginnt(tag,m)&&(d.letzter_tag!=tag||d.letztes_fenster!=m);d.letzter_tag=tag;d.letztes_fenster=m;
+              return neu&&id(ofen_bus).status_fresh(5000)&&id(ofen_bus).status.state==(long)ofen::State::STOP;
+          then:
+            - lambda: esphome::ofen_link::display_runtime.meldung="Heizzeit beginnt – Ofen anzünden?";
+            - script.execute: {id: push, titel: "Heizzeit beginnt", nachricht: "Heizzeit beginnt – Ofen anzünden?"}
+  - interval: 5min
+    then:
+      - lambda: |-
+          auto &d=esphome::ofen_link::display_runtime;auto &s=id(ofen_bus).status;d.history(id(raum_temp).state,d.soll_c,s.abgas_c,s.kw);
+          if(d.chart){auto *c=(lv_obj_t*)d.chart;lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_raum,std::isnan(id(raum_temp).state)?LV_CHART_POINT_NONE:lroundf(id(raum_temp).state*10));
+          lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_soll,lroundf(d.soll_c*10));lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_abgas,std::isnan(s.abgas_c)?LV_CHART_POINT_NONE:lroundf(s.abgas_c));
+          lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_leistung,lroundf(s.kw*10));}
+
+lvgl:
+  displays: [display_panel]
+  touchscreens: [touch_panel]
+  bg_color: 0x101820
+  text_color: 0xFFFFFF
+  default_font: schrift_24
+  theme:
+    button: {bg_color: 0x274C77, radius: 8, pressed: {bg_color: 0x6096BA}}
+  top_layer:
+    widgets:
+      - button:
+          x: 650
+          y: 400
+          width: 145
+          height: 75
+          bg_color: 0xC1121F
+          widgets: [{label: {align: CENTER, text: STOPP, text_font: schrift_36}}]
+          on_click: [{button.press: stopp}]
+  on_idle:
+    - timeout: !lambda 'return (uint32_t)id(screensaver_min).state*60000UL;'
+      then: [{lvgl.pause: {show_snow: false}}]
+  pages:
+    - id: uebersicht_seite
+      widgets:
+        - {label: {id: lbl_raum, x: 35, y: 25, text: "--.- °C", text_font: schrift_60}}
+        - {label: {id: lbl_soll, x: 40, y: 105, text: "Soll 20.0 °C", text_font: schrift_36}}
+        - button: {x: 360, y: 65, width: 75, height: 70, widgets: [{label: {align: CENTER, text: "-", text_font: schrift_36}}], on_click: [{number.decrement: sollwert}]}
+        - button: {x: 450, y: 65, width: 75, height: 70, widgets: [{label: {align: CENTER, text: "+", text_font: schrift_36}}], on_click: [{number.increment: sollwert}]}
+        - {label: {id: lbl_zustand, x: 35, y: 165, width: 730, height: 56, pad_all: 8, radius: 8, bg_opa: COVER, bg_color: 0x5C677D, text: Verbindung wird aufgebaut, text_font: schrift_36}}
+        - {bar: {id: leistung_bar, x: 560, y: 40, width: 220, height: 40, min_value: 170, max_value: 330, value: 170}}
+        - {label: {x: 560, y: 88, text: "17 ... 33 kW"}}
+        - {label: {id: lbl_fenster, x: 560, y: 118, width: 230, text: ""}}
+        - {label: {id: lbl_reinigung, x: 35, y: 355, text: ""}}
+        - {label: {id: lbl_ofenwerte, x: 35, y: 235, text: "Abgas -- °C   Leistung -- kW"}}
+        - {label: {id: lbl_details, x: 35, y: 275, text: "Kette --   Lüfter --"}}
+        - {label: {id: lbl_warnung, x: 35, y: 320, width: 730, text_color: 0xFFD60A, text: ""}}
+        - button: {x: 15, y: 400, width: 145, height: 65, widgets: [{label: {align: CENTER, text: START}}], on_click: [{lambda: 'auto &d=esphome::ofen_link::display_runtime;lv_label_set_text(id(lbl_startsperre),d.start_erlaubt(id(ofen_bus).status,id(ofen_bus).status_fresh(5000))?"Ofen angezündet? Papier brennt?":d.startsperre(id(ofen_bus).status,id(ofen_bus).status_fresh(5000)).c_str());'}, {lvgl.page.show: start_seite}]}
+        - button: {x: 175, y: 400, width: 145, height: 65, widgets: [{label: {align: CENTER, text: Verlauf}}], on_click: [{lvgl.page.show: verlauf_seite}]}
+        - button: {x: 335, y: 400, width: 200, height: 65, widgets: [{label: {align: CENTER, text: Einstellungen}}], on_click: [{lvgl.page.show: pin_seite}]}
+    - id: start_seite
+      widgets:
+        - {label: {x: 40, y: 35, text: Manueller Start, text_font: schrift_36}}
+        - {label: {id: lbl_startsperre, x: 40, y: 105, width: 700, text: Prüfung läuft}}
+        - button:
+            x: 220
+            y: 195
+            width: 360
+            height: 100
+            bg_color: 0x2A9D8F
+            widgets: [{label: {align: CENTER, text: JA – STARTEN, text_font: schrift_36}}]
+            on_click: [{if: {condition: {lambda: 'return esphome::ofen_link::display_runtime.start_erlaubt(id(ofen_bus).status,id(ofen_bus).status_fresh(5000));'}, then: [{lambda: 'id(ofen_bus).send_cmd(''C'',"START");'}, {lvgl.page.show: uebersicht_seite}]}}]
+        - button: {x: 40, y: 390, width: 150, height: 70, widgets: [{label: {align: CENTER, text: Zurück}}], on_click: [{lvgl.page.show: uebersicht_seite}]}
+    - id: alarm_seite
+      bg_color: 0x8B0000
+      widgets:
+        - {label: {x: 35, y: 25, text: ALARM, text_font: schrift_60}}
+        - {label: {id: lbl_alarm, x: 35, y: 120, width: 720, text: Alarm, text_font: schrift_36}}
+        - {label: {id: lbl_alarm_hinweis, x: 35, y: 185, width: 720, text: Ursache prüfen}}
+        - button: {x: 250, y: 300, width: 300, height: 80, widgets: [{label: {align: CENTER, text: QUITTIEREN}}], on_click: [{lambda: 'id(ofen_bus).send_cmd(''C'',"ACK");'}]}
+    - id: verlauf_seite
+      on_load:
+        - lambda: |-
+            auto &d=esphome::ofen_link::display_runtime;
+            if(!d.chart){auto *c=lv_chart_create(id(verlauf_seite)->obj);d.chart=c;lv_obj_set_pos(c,30,65);lv_obj_set_size(c,720,300);
+            lv_chart_set_type(c,LV_CHART_TYPE_LINE);lv_chart_set_point_count(c,288);lv_chart_set_range(c,LV_CHART_AXIS_PRIMARY_Y,0,350);lv_chart_set_range(c,LV_CHART_AXIS_SECONDARY_Y,0,600);
+            lv_obj_set_style_size(c,0,0,LV_PART_INDICATOR);
+            d.chart_raum=lv_chart_add_series(c,lv_color_hex(0x00D4FF),LV_CHART_AXIS_PRIMARY_Y);
+            d.chart_soll=lv_chart_add_series(c,lv_color_hex(0xFFFFFF),LV_CHART_AXIS_PRIMARY_Y);
+            d.chart_abgas=lv_chart_add_series(c,lv_color_hex(0xFF7B00),LV_CHART_AXIS_SECONDARY_Y);
+            d.chart_leistung=lv_chart_add_series(c,lv_color_hex(0x2A9D3F),LV_CHART_AXIS_PRIMARY_Y);
+            auto pt=[](int16_t v)->int32_t{return v==INT16_MIN?LV_CHART_POINT_NONE:(int32_t)v;};
+            for(int i=0;i<d.hist_count;i++){int k=(d.hist_pos-d.hist_count+i+d.HIST_N)%d.HIST_N;
+              lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_raum,pt(d.hist_raum[k]));lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_soll,pt(d.hist_soll[k]));
+              lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_abgas,d.hist_abgas[k]==INT16_MIN?LV_CHART_POINT_NONE:d.hist_abgas[k]/10);lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_leistung,pt(d.hist_leistung[k]));}}
+      widgets:
+        - {label: {x: 25, y: 10, text: Verlauf 24 Stunden, text_font: schrift_36}}
+        - {label: {x: 200, y: 375, width: 440, text: "Blau Raum, Weiß Soll (0,1 °C), Grün Leistung (0,1 kW), Orange Abgas (°C, rechts)"}}
+        - button: {x: 25, y: 400, width: 150, height: 65, widgets: [{label: {align: CENTER, text: Zurück}}], on_click: [{lvgl.page.show: uebersicht_seite}]}
+    - id: pin_seite
+      widgets:
+        - {label: {x: 40, y: 30, text: Einstellungen – PIN, text_font: schrift_36}}
+        - {spinbox: {id: pin_spin, x: 250, y: 120, width: 300, height: 70, range_from: 0, range_to: 9999, digits: 4, value: 0, text_align: CENTER}}
+        - button: {x: 250, y: 220, width: 300, height: 75, widgets: [{label: {align: CENTER, text: ÖFFNEN}}], on_click: [{if: {condition: {lambda: 'return lv_spinbox_get_value(id(pin_spin))==(int)id(pin_code).state;'}, then: [{lambda: 'id(pin_freigabe_bis)=millis()+300000UL;'}, {lvgl.page.show: einstellung_seite}]}}]}
+        - button: {x: 40, y: 390, width: 150, height: 70, widgets: [{label: {align: CENTER, text: Zurück}}], on_click: [{lvgl.page.show: uebersicht_seite}]}
+    - id: einstellung_seite
+      on_load: [{if: {condition: {lambda: 'return millis()>id(pin_freigabe_bis);'}, then: [{lvgl.page.show: pin_seite}]}}]
+      widgets:
+        - {label: {x: 25, y: 10, text: Einstellungen, text_font: schrift_36}}
+        - {label: {x: 30, y: 75, width: 740, text: "Zeitprogramm (pro Tag bis 4 Fenster, z. B. 06:00-08:00=21), Absenkung, Kp/Ti, Öldichte, Bildschirmschoner und Push stellst du im Webinterface ein."}}
+        - {label: {id: lbl_info, x: 30, y: 140, width: 740, text: ""}}
+        - button: {x: 30, y: 220, width: 250, height: 80, widgets: [{label: {align: CENTER, text: Kalibrierung}}], on_click: [{lvgl.page.show: kal_seite}]}
+        - button: {x: 300, y: 220, width: 270, height: 80, widgets: [{label: {align: CENTER, text: Reinigung Reset}}], on_click: [{button.press: reinigung_reset}]}
+        - button: {x: 30, y: 395, width: 150, height: 65, widgets: [{label: {align: CENTER, text: Zurück}}], on_click: [{lvgl.page.show: uebersicht_seite}]}
+    - id: kal_seite
+      widgets:
+        - {label: {x: 25, y: 10, text: Kalibrierassistent, text_font: schrift_36}}
+        - {label: {x: 30, y: 70, width: 710, text: "Pumpe: 5 Stufen à 3 min, danach Menge in ml eingeben. STOPP bricht jederzeit ab."}}
+        - button:
+            x: 30
+            y: 190
+            width: 220
+            height: 80
+            widgets: [{label: {align: CENTER, text: PUMPE MESSEN}}]
+            on_click: [{lvgl.page.show: kal_bestaetigung_seite}]
+        - button: {x: 270, y: 190, width: 220, height: 80, widgets: [{label: {align: CENTER, text: FLAMME LERNEN}}], on_click: [{lambda: 'auto &d=esphome::ofen_link::display_runtime;if(id(ofen_bus).status.state==(long)ofen::State::BETRIEB){d.kal=esphome::ofen_link::DisplayRuntime::KalSchritt::FLAMME;d.kal_start_ms=millis();d.flamme_summe=0;d.flamme_n=0;}'}]}
+        - button: {x: 510, y: 190, width: 220, height: 80, widgets: [{label: {align: CENTER, text: SPRUNGTEST}}], on_click: [{lambda: 'auto &d=esphome::ofen_link::display_runtime;if(id(ofen_bus).status.state==(long)ofen::State::BETRIEB&&millis()-d.betrieb_seit_ms>=3600000UL){d.kal=esphome::ofen_link::DisplayRuntime::KalSchritt::SPRUNG;d.kal_start_ms=millis();d.sprung_n=0;}else d.meldung="Sprungtest erst nach 60 min Betrieb";'}]}
+        - {spinbox: {id: kal_ml_spin, x: 30, y: 300, width: 180, height: 70, range_from: 0, range_to: 2000, digits: 4, value: 0, text_align: CENTER}}
+        - button:
+            x: 230
+            y: 300
+            width: 220
+            height: 70
+            widgets: [{label: {align: CENTER, text: WERT SPEICHERN}}]
+            on_click:
+              - lambda: |-
+                  auto &d=esphome::ofen_link::display_runtime;if(d.kal!=esphome::ofen_link::DisplayRuntime::KalSchritt::PUMPE||!d.kal_wartet_ml)return;
+                  d.kal_ml[d.kal_stufe]=lv_spinbox_get_value(id(kal_ml_spin));d.kal_stufe++;d.kal_wartet_ml=false;
+                  if(d.kal_stufe<5){d.stufe_start_ms=millis();id(ofen_bus).send_cmd('C',"KAL",std::to_string(lroundf(d.kal_pwm[d.kal_stufe]*1000)));}
+                  else{id(ofen_bus).send_cmd('C',"STOP");d.pumpe_auswerten(id(oeldichte).state);d.kal=esphome::ofen_link::DisplayRuntime::KalSchritt::AUS;d.meldung=std::isnan(d.neu_min_pwm)?"Pumpenmessung nicht plausibel":"Pumpenkennlinie berechnet – ÜBERNEHMEN drücken";}
+        - button:
+            x: 470
+            y: 300
+            width: 160
+            height: 70
+            widgets: [{label: {align: CENTER, text: ÜBERNEHMEN}}]
+            on_click:
+              - lambda: |-
+                  auto &d=esphome::ofen_link::display_runtime;
+                  if(!std::isnan(d.neu_min_pwm)){id(ofen_bus).send_cmd('K',"min_pwm",std::to_string(d.neu_min_pwm));id(ofen_bus).send_cmd('K',"max_pwm",std::to_string(d.neu_max_pwm));d.alt_min_pwm=d.neu_min_pwm;d.alt_max_pwm=d.neu_max_pwm;d.neu_min_pwm=d.neu_max_pwm=NAN;}
+                  if(!std::isnan(d.neu_flamme)){id(ofen_bus).send_cmd('K',"flamme_aus_c",std::to_string(d.neu_flamme));d.alt_flamme=d.neu_flamme;d.neu_flamme=NAN;}
+                  if(d.sprung_ergebnis.ok){id(kp).publish_state(d.sprung_ergebnis.kp);id(ti).publish_state(d.sprung_ergebnis.ti_min);d.sprung_ergebnis.ok=false;}
+        - button: {x: 640, y: 300, width: 145, height: 70, widgets: [{label: {align: CENTER, text: ALT}}], on_click: [{lambda: 'auto &d=esphome::ofen_link::display_runtime;id(ofen_bus).send_cmd(''K'',"min_pwm",std::to_string(d.alt_min_pwm));id(ofen_bus).send_cmd(''K'',"max_pwm",std::to_string(d.alt_max_pwm));id(ofen_bus).send_cmd(''K'',"flamme_aus_c",std::to_string(d.alt_flamme));'}]}
+        - button: {x: 30, y: 395, width: 150, height: 65, widgets: [{label: {align: CENTER, text: Zurück}}], on_click: [{lvgl.page.show: einstellung_seite}]}
+    - id: kal_bestaetigung_seite
+      widgets:
+        - {label: {x: 40, y: 35, text: Pumpe ohne Flamme, text_font: schrift_36}}
+        - {label: {x: 40, y: 100, width: 720, text: "Ofen ist kalt. Die Ölleitung ist vom Brenner gelöst und steckt im Messbecher. Die Pumpe läuft 5 Stufen à 3 min, STOPP bricht jederzeit ab."}}
+        - button:
+            x: 170
+            y: 230
+            width: 460
+            height: 100
+            bg_color: 0xE76F00
+            widgets: [{label: {align: CENTER, text: "JA, LEITUNG IM BECHER", text_font: schrift_36}}]
+            on_click:
+              - lambda: 'auto &d=esphome::ofen_link::display_runtime;if(d.start_erlaubt(id(ofen_bus)->status,id(ofen_bus)->status_fresh(5000))){d.kal=esphome::ofen_link::DisplayRuntime::KalSchritt::PUMPE;d.kal_start_ms=d.stufe_start_ms=millis();d.kal_stufe=0;d.kal_wartet_ml=false;id(ofen_bus)->send_cmd(''C'',"KAL","300");}else d.meldung=d.startsperre(id(ofen_bus)->status,id(ofen_bus)->status_fresh(5000));'
+              - lvgl.page.show: kal_seite
+        - button: {x: 40, y: 390, width: 160, height: 70, widgets: [{label: {align: CENTER, text: Abbrechen}}], on_click: [{lvgl.page.show: kal_seite}]}

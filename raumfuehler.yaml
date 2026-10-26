@@ -1,0 +1,41 @@
+esphome:
+  name: raumfuehler
+  friendly_name: Raumfühler
+
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: esp-idf
+
+logger:
+
+espnow:
+  channel: !secret wifi_channel
+  peers:
+    - !secret display_mac
+
+packet_transport:
+  - platform: espnow
+    peer_address: !secret display_mac
+    update_interval: 30s
+    encryption: !secret transport_key
+    rolling_code_enable: true
+    sensors:
+      - raumtemperatur
+
+one_wire:
+  - platform: gpio
+    pin: GPIO4
+
+sensor:
+  - platform: dallas_temp
+    id: raumtemperatur
+    name: Raumtemperatur
+    update_interval: 30s
+
+# Optional für späteren Batteriebetrieb. Vorher sicherstellen, dass Messung
+# und ESP-NOW-Übertragung abgeschlossen sind; im USB-Betrieb bleibt dies aus.
+# deep_sleep:
+#   run_duration: 10s
+#   sleep_duration: 20s
+

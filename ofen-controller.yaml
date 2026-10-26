@@ -1,0 +1,248 @@
+# Ofen-Controller: NodeMCU Amica V2 (ESP8266). Entscheidet allein über die Pumpe.
+# Vor dem Einbau am Ofen MUSS sim: "false" gesetzt sein!
+substitutions:
+  sim: "false"            # "true" = Simulationsmodus am Tisch, Pumpe bleibt physisch aus
+  a0_scale: "3.2"         # NodeMCU-Teiler 220k/100k vor dem ADC (Chip misst 0..1 V)
+  # Schwellen an A0 in Volt für R1 = R2 = 75 kΩ. Bei 68/82 kΩ neu berechnen (README).
+  a0_ok_min: "2.0"
+  a0_ueberlauf_min: "0.8"
+  a0_ueberlauf_max: "1.8"
+  a0_stb_max: "0.5"
+
+esphome:
+  name: ofen-controller
+  friendly_name: Ofen-Controller
+  on_boot:
+    # Regel 15: Pumpe vor allem anderen aus
+    - priority: 1000
+      then:
+        - output.set_level:
+            id: pumpe
+            level: 0%
+    # Nach dem Hardware-Setup noch einmal, falls der Ausgang vorher nicht bereit war
+    - priority: 750
+      then:
+        - output.set_level:
+            id: pumpe
+            level: 0%
+    # Kalibrierwerte (geprüft) und Schwellen aus dem Flash in die Logik übernehmen
+    - priority: 600
+      then:
+        - lambda: |-
+            auto &c = id(ctrl);
+            if (!c.load(id(g_min_pwm), id(g_max_pwm), id(g_flamme_aus_c), id(g_abgas_max_c)))
+              ESP_LOGW("ofen", "Gespeicherte Kalibrierwerte unplausibel – Standardwerte für diese Werte verwendet");
+            c.th = {${a0_ok_min}f, ${a0_ueberlauf_min}f, ${a0_ueberlauf_max}f, ${a0_stb_max}f};
+            if (${sim}) ESP_LOGW("ofen", "SIMULATIONSMODUS aktiv – Pumpe wird nicht angesteuert");
+
+esp8266:
+  board: nodemcuv2
+  restore_from_flash: true  # nur für die Kalibrierwerte unten
+
+external_components:
+  - source:
+      type: local
+      path: components
+
+# UART0 gehört dem RS485-Modul
+logger:
+  baud_rate: 0
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  reboot_timeout: 0s  # Regel 15: nie wegen fehlendem WLAN neu starten
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# Nur lesend plus Logs; im Simulationsmodus zusätzlich die Sim-Schalter
+web_server:
+  version: 3
+  auth:
+    type: digest
+    username: !secret web_username
+    password: !secret web_password
+
+uart:
+  id: rs485_uart
+  tx_pin: GPIO1
+  rx_pin: GPIO3
+  baud_rate: 19200
+
+ofen_link:
+  id: link
+  uart_id: rs485_uart
+
+spi:
+  clk_pin: GPIO14
+  miso_pin: GPIO12
+
+output:
+  - platform: esp8266_pwm
+    id: pumpe
+    pin: GPIO5
+    frequency: 1000 Hz
+  # Status-LED auf D4 (blinkt bei Display-Verbindungsfehler). Entfällt, wenn D4 für DS18B20 genutzt wird.
+  - platform: gpio
+    id: led
+    pin:
+      number: GPIO2
+      inverted: true
+
+globals:
+  - id: ctrl
+    type: esphome::ofen_link::OfenController
+  # Kalibrierwerte: restore_value ist hier erlaubt, es sind keine Betriebszustände
+  - id: g_min_pwm
+    type: float
+    restore_value: yes
+    initial_value: "0.35"
+  - id: g_max_pwm
+    type: float
+    restore_value: yes
+    initial_value: "0.80"
+  - id: g_flamme_aus_c
+    type: float
+    restore_value: yes
+    initial_value: "120"
+  - id: g_abgas_max_c
+    type: float
+    restore_value: yes
+    initial_value: "450"
+
+sensor:
+  - platform: adc
+    id: a0_spannung
+    name: "A0 Sicherheitskette"
+    pin: A0
+    update_interval: 100ms
+    accuracy_decimals: 2
+    unit_of_measurement: V
+    filters:
+      - multiply: ${a0_scale}
+      - sliding_window_moving_average:
+          window_size: 10
+          send_every: 10
+    on_raw_value:
+      # Regel 3: schon eine einzelne ungemittelte Fehlmessung (alle 100 ms) schaltet die Pumpe sofort ab
+      - lambda: |-
+          if (${sim}) return;
+          ofen::Chain c = ofen::classify_chain(x * ${a0_scale}f, id(ctrl).th);
+          if (c != ofen::Chain::OK) {
+            id(ctrl).raw_fault = c;
+            id(pumpe).set_level(0);
+          }
+
+  - platform: max6675
+    id: abgas
+    name: "Abgastemperatur"
+    cs_pin: GPIO13
+    update_interval: 1s
+
+  - platform: template
+    name: "Pumpe PWM"
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    update_interval: 5s
+    lambda: return id(ctrl).out.pwm * 100.0f;
+
+  - platform: template
+    name: "Leistung"
+    unit_of_measurement: kW
+    accuracy_decimals: 1
+    update_interval: 5s
+    lambda: return id(ctrl).out.kw;
+
+binary_sensor:
+  # Optokoppler OK1: aktiv LOW, Pull-up auf dem Modul. GPIO16 ohne Interrupt -> Polling.
+  - platform: gpio
+    id: luefter
+    name: "Lüfter (Kammer warm)"
+    pin:
+      number: GPIO16
+      inverted: true
+    use_interrupt: false
+    filters:
+      - delayed_on_off: 1s
+
+text_sensor:
+  - platform: template
+    name: "Zustand"
+    update_interval: 2s
+    lambda: return std::string(ofen::state_name(id(ctrl).mem.state));
+  - platform: template
+    name: "Alarm"
+    update_interval: 2s
+    lambda: return std::string(ofen::alarm_text(id(ctrl).mem.alarm));
+
+# --- Simulationsmodus: Eingänge per Webinterface ---
+switch:
+  - platform: template
+    id: sim_kette_offen
+    name: "Sim: Kette offen"
+    optimistic: true
+  - platform: template
+    id: sim_kammer_warm
+    name: "Sim: Kammer warm"
+    optimistic: true
+
+number:
+  - platform: template
+    id: sim_abgas
+    name: "Sim: Abgas"
+    optimistic: true
+    min_value: 0
+    max_value: 600
+    step: 5
+    initial_value: 20
+    unit_of_measurement: "°C"
+
+button:
+  # Nur im Simulationsmodus wirksam (am Ofen startet nur das Display)
+  - platform: template
+    name: "Sim: Start"
+    on_press:
+      - lambda: if (${sim}) id(link).rx.push_back(ofen::CommandMsg{'C', 0, "START", ""});
+  - platform: template
+    name: "Sim: Stopp"
+    on_press:
+      - lambda: if (${sim}) id(link).rx.push_back(ofen::CommandMsg{'C', 0, "STOP", ""});
+  - platform: template
+    name: "Sim: Quittieren"
+    on_press:
+      - lambda: if (${sim}) id(link).rx.push_back(ofen::CommandMsg{'C', 0, "ACK", ""});
+
+interval:
+  - interval: 100ms
+    then:
+      - lambda: |-
+          auto &c = id(ctrl);
+          const uint32_t now = millis();
+          float a0 = ${sim} ? (id(sim_kette_offen).state ? 0.0f : 2.6f) : id(a0_spannung).state;
+          // Erster A0-Mittelwert kommt nach 1 s; bis dahin kein Schritt (sonst Ketten-Alarm bei jedem Boot)
+          if (std::isnan(a0) && now < 5000 && c.raw_fault == ofen::Chain::OK) return;
+          bool warm = ${sim} ? id(sim_kammer_warm).state : id(luefter).state;
+          float abgas_c = ${sim} ? id(sim_abgas).state : id(abgas).state;
+          float pwm = c.tick(*id(link), a0, warm, abgas_c, now);
+          if (!${sim}) id(pumpe).set_level(pwm);
+          if (c.cfg_changed) {
+            c.cfg_changed = false;
+            id(g_min_pwm) = c.cfg.min_pwm;
+            id(g_max_pwm) = c.cfg.max_pwm;
+            id(g_flamme_aus_c) = c.cfg.flamme_aus_c;
+            id(g_abgas_max_c) = c.cfg.abgas_max_c;
+          }
+          // Regel 11: LED blinkt bei fehlender Display-Verbindung, sonst aus
+          bool blink = (c.mem.warn & ofen::W_DISPLAY) && ((now / 1000) % 2);
+          if (blink) id(led).turn_on(); else id(led).turn_off();
+
+# Optional: DS18B20 als Rückfall-Raumfühler an D4 (dann LED oben entfernen)
+# one_wire:
+#   - platform: gpio
+#     pin: GPIO2
+# sensor:
+#   - platform: dallas_temp
+#     name: "Raumtemperatur Kabel"
+#     update_interval: 30s
