@@ -1,6 +1,19 @@
 substitutions:
   ntfy_topic: !secret ntfy_topic
   ntfy_url: "https://ntfy.sh/${ntfy_topic}"
+  color_bg: "0x0B0F14"
+  color_card: "0x141A22"
+  color_border: "0x222B36"
+  color_divider: "0x1C2430"
+  color_text: "0xE8ECF1"
+  color_secondary: "0x8B95A5"
+  color_muted: "0x5B6573"
+  color_stop: "0x6B7280"
+  color_ignition: "0xF59E0B"
+  color_running: "0x22C55E"
+  color_shutdown: "0x3B82F6"
+  color_alarm: "0xEF4444"
+  color_calibration: "0xA855F7"
 
 esphome:
   name: ofen-display
@@ -68,9 +81,11 @@ touchscreen:
       - lvgl.resume:
 
 font:
-  - {file: "gfonts://Roboto", id: schrift_24, size: 24, glyphsets: [GF_Latin_Kernel], glyphs: "äöüÄÖÜß°–…×àé·"}
-  - {file: {type: gfonts, family: Roboto, weight: 700}, id: schrift_36, size: 36, glyphsets: [GF_Latin_Kernel], glyphs: "äöüÄÖÜß°–…×àé·"}
-  - {file: {type: gfonts, family: Roboto, weight: 700}, id: schrift_60, size: 60, glyphsets: [GF_Latin_Kernel], glyphs: "äöüÄÖÜß°–…×àé·"}
+  - {file: {type: gfonts, family: Inter, weight: 300}, id: inter_96, size: 96, bpp: 4, glyphsets: [GF_Latin_Kernel], glyphs: "äöüÄÖÜß°–…×àé·"}
+  - {file: {type: gfonts, family: Inter, weight: 300}, id: inter_40, size: 40, bpp: 4, glyphsets: [GF_Latin_Kernel], glyphs: "äöüÄÖÜß°–…×àé·"}
+  - {file: {type: gfonts, family: Inter, weight: 500}, id: inter_20, size: 20, bpp: 4, glyphsets: [GF_Latin_Kernel], glyphs: "äöüÄÖÜß°–…×àé·"}
+  - {file: {type: gfonts, family: Inter, weight: 600}, id: inter_14, size: 14, bpp: 4, glyphsets: [GF_Latin_Kernel], glyphs: "äöüÄÖÜß°–…×àé·"}
+  - {file: {type: gfonts, family: Inter, weight: 600}, id: inter_28, size: 28, bpp: 4, glyphsets: [GF_Latin_Kernel], glyphs: "äöüÄÖÜß°–…×àé·"}
 
 uart:
   - {id: rs485_uart, tx_pin: GPIO16, rx_pin: GPIO15, baud_rate: 19200, data_bits: 8, parity: NONE, stop_bits: 1}
@@ -319,19 +334,31 @@ interval:
           if(millis()-d.letzter_raum_ms>600000UL)d.raum_warnung=true;
           if(d.kal_abbrechen(bus.status,frisch,id(raum_temp).state,millis())){bus.send_cmd('C',"STOP");d.kal=esphome::ofen_link::DisplayRuntime::KalSchritt::AUS;d.meldung="Kalibrierung abgebrochen";}
           if(d.kal==esphome::ofen_link::DisplayRuntime::KalSchritt::PUMPE&&!d.kal_wartet_ml&&millis()-d.stufe_start_ms>=180000UL){bus.send_cmd('C',"STOP");d.kal_wartet_ml=true;d.meldung="Menge eingeben und WERT SPEICHERN drücken";}
-          char b[180]; snprintf(b,sizeof(b),frisch?"%s%s":"VERBINDUNGSFEHLER – keine aktuellen Ofendaten",frisch?ofen::state_name((ofen::State)bus.status.state):"",(frisch&&bus.status.warn)?" – WARNUNG":"");lv_label_set_text(id(lbl_zustand),b);
-          if(id(raum_temp).has_state())snprintf(b,sizeof(b),"%.1f °C",id(raum_temp).state);else snprintf(b,sizeof(b),"--.- °C");lv_label_set_text(id(lbl_raum),b);
-          snprintf(b,sizeof(b),"Soll %.1f °C",d.soll_c);lv_label_set_text(id(lbl_soll),b);
-          snprintf(b,sizeof(b),"Abgas %.1f °C   Leistung %.1f kW",bus.status.abgas_c,bus.status.kw);lv_label_set_text(id(lbl_ofenwerte),b);
+          char b[180]; snprintf(b,sizeof(b),frisch?"%s%s":"VERBINDUNGSFEHLER",frisch?ofen::state_name((ofen::State)bus.status.state):"",(frisch&&bus.status.warn)?" – WARNUNG":"");lv_label_set_text(id(lbl_zustand),b);
+          auto komma=[](char *s){for(;*s;s++)if(*s=='.')*s=',';};  // deutsches Dezimalkomma
+          if(id(raum_temp).has_state())snprintf(b,sizeof(b),"%.1f°",id(raum_temp).state);else snprintf(b,sizeof(b),"--,-°");komma(b);lv_label_set_text(id(lbl_raum),b);
+          snprintf(b,sizeof(b),"%.1f",d.soll_c);komma(b);lv_label_set_text(id(lbl_soll),b);
+          snprintf(b,sizeof(b),"%.1f",bus.status.abgas_c);komma(b);lv_label_set_text(id(lbl_ofenwerte),b);
+          snprintf(b,sizeof(b),"%.1f",bus.status.kw);komma(b);lv_label_set_text(id(lbl_leistung),b);
           static const char *const kette[4]={"STB und Überlauf zu","Überlauf offen","STB offen / F3","Kettenfehler"};
-          snprintf(b,sizeof(b),"Kette: %s   Lüfter: %s",kette[bus.status.kette&3],bus.status.luefter?"AN":"AUS");lv_label_set_text(id(lbl_details),b);
+          snprintf(b,sizeof(b),"%s",kette[bus.status.kette&3]);lv_label_set_text(id(lbl_details),b);
+          lv_label_set_text(id(lbl_luefter),bus.status.luefter?"Lüfter an":"Lüfter aus");
           if(frisch&&bus.status.anlauf_rest_s>0){snprintf(b,sizeof(b),"%s – noch %ld min",ofen::state_name((ofen::State)bus.status.state),(bus.status.anlauf_rest_s+59)/60);lv_label_set_text(id(lbl_zustand),b);}
-          // Zustandskachel: Stop grau, Anzünden/Anlauf orange, Betrieb grün, Auslöschen blau, Alarm rot
-          static const uint32_t farbe[7]={0x5C677D,0xE76F00,0xE76F00,0x2A9D3F,0x1D4ED8,0xC1121F,0x7B2CBF};
-          lv_obj_set_style_bg_color(id(lbl_zustand),lv_color_hex(frisch?farbe[bus.status.state%7]:0xC1121F),0);
+          // Zustandsfarbe: Stop, Anzünden/Anlauf, Betrieb, Auslöschen, Alarm, Kalibrierung
+          static const uint32_t farbe[7]={0x6B7280,0xF59E0B,0xF59E0B,0x22C55E,0x3B82F6,0xEF4444,0xA855F7};
+          uint32_t status_farbe=frisch?farbe[bus.status.state%7]:0xEF4444;
+          lv_obj_set_style_bg_color(id(zustand_punkt),lv_color_hex(status_farbe),0);
+          lv_obj_set_style_bg_color(id(zustand_karte),lv_color_hex(frisch?0x141A22:0x7F1D1D),0);
+          lv_obj_set_style_border_color(id(zustand_karte),lv_color_hex(frisch?0x222B36:0xEF4444),0);
+          lv_obj_set_style_bg_color(id(kette_punkt),lv_color_hex(frisch&&(bus.status.kette&3)==0?0x22C55E:0xEF4444),0);
+          lv_obj_set_style_bg_color(id(luefter_punkt),lv_color_hex(frisch&&bus.status.luefter?0x22C55E:0x6B7280),0);
+          bool start_ok=d.start_erlaubt(bus.status,frisch);
+          lv_obj_set_style_bg_color(id(btn_start),lv_color_hex(start_ok?0x22C55E:0x141A22),0);
+          lv_obj_set_style_border_width(id(btn_start),start_ok?0:1,0);
+          lv_obj_set_style_text_color(id(btn_start),lv_color_hex(start_ok?0x0B0F14:0xE8ECF1),0);
           lv_bar_set_value(id(leistung_bar),frisch&&bus.status.kw>0?lroundf(bus.status.kw*10):170,LV_ANIM_OFF);
-          snprintf(b,sizeof(b),"Tellerreinigung: %.1f h",id(betriebsstunden));lv_label_set_text(id(lbl_reinigung),b);
-          {auto n=id(netzzeit).now();std::string f=d.programm_an&&n.is_valid()?d.naechstes_fenster((n.day_of_week+5)%7,n.hour*60+n.minute):"";lv_label_set_text(id(lbl_fenster),f.empty()?"Zeitprogramm aus":("Nächste Heizzeit: "+f).c_str());}
+          snprintf(b,sizeof(b),"%.1f h Reinigung",id(betriebsstunden));komma(b);lv_label_set_text(id(lbl_reinigung),b);
+          {auto n=id(netzzeit).now();std::string f=d.programm_an&&n.is_valid()?d.naechstes_fenster((n.day_of_week+5)%7,n.hour*60+n.minute):"";lv_label_set_text(id(lbl_fenster),f.empty()?"Zeitprogramm aus":f.c_str());}
           {std::string empf=id(raum_temp).has_state()?std::to_string((millis()-d.letzter_raum_ms)/1000)+" s seit Empfang":"noch nichts empfangen";
           snprintf(b,sizeof(b),"Funkfühler: %s\nWLAN: %s (%.0f dBm)",empf.c_str(),wifi::global_wifi_component->is_connected()?"verbunden":"getrennt",id(wlan_rssi).state);lv_label_set_text(id(lbl_info),b);}
           lv_label_set_text(id(lbl_warnung),d.raum_warnung?"WARNUNG: Raumfühler fehlt seit mehr als 10 min":d.meldung.c_str());
@@ -390,20 +417,62 @@ interval:
 lvgl:
   displays: [display_panel]
   touchscreens: [touch_panel]
-  bg_color: 0x101820
-  text_color: 0xFFFFFF
-  default_font: schrift_24
+  bg_color: "${color_bg}"
+  text_color: "${color_text}"
+  default_font: inter_20
+  style_definitions:
+    - id: stil_karte
+      bg_color: "${color_card}"
+      bg_opa: COVER
+      border_color: "${color_border}"
+      border_width: 1
+      radius: 16
+      shadow_width: 0
+      pad_all: 0
+    - id: stil_kacheltitel
+      text_font: inter_14
+      text_color: "${color_secondary}"
+      text_letter_space: 2
+    - id: stil_seitentitel
+      text_font: inter_28
+      text_color: "${color_text}"
+    - id: stil_ghost
+      bg_color: "${color_card}"
+      bg_opa: COVER
+      border_color: "${color_border}"
+      border_width: 1
+      radius: 12
+      shadow_width: 0
+      text_color: "${color_text}"
+      text_font: inter_20
   theme:
-    button: {bg_color: 0x274C77, radius: 8, pressed: {bg_color: 0x6096BA}}
+    button:
+      bg_color: "${color_card}"
+      border_color: "${color_border}"
+      border_width: 1
+      radius: 12
+      shadow_width: 0
+      text_color: "${color_text}"
+      pressed: {bg_color: "${color_divider}"}
+    label: {text_color: "${color_text}"}
+    spinbox:
+      bg_color: "${color_card}"
+      border_color: "${color_border}"
+      border_width: 1
+      radius: 12
+      shadow_width: 0
+      text_color: "${color_text}"
   top_layer:
     widgets:
       - button:
-          x: 650
+          x: 640
           y: 400
-          width: 145
-          height: 75
-          bg_color: 0xC1121F
-          widgets: [{label: {align: CENTER, text: STOPP, text_font: schrift_36}}]
+          width: 144
+          height: 64
+          bg_color: "${color_alarm}"
+          border_width: 0
+          shadow_width: 0
+          widgets: [{label: {align: CENTER, text: STOPP, text_font: inter_20}}]
           on_click: [{button.press: stopp}]
   on_idle:
     - timeout: !lambda 'return (uint32_t)id(screensaver_min).state*60000UL;'
@@ -411,94 +480,231 @@ lvgl:
   pages:
     - id: uebersicht_seite
       widgets:
-        - {label: {id: lbl_raum, x: 35, y: 25, text: "--.- °C", text_font: schrift_60}}
-        - {label: {id: lbl_soll, x: 40, y: 105, text: "Soll 20.0 °C", text_font: schrift_36}}
-        - button: {x: 360, y: 65, width: 75, height: 70, widgets: [{label: {align: CENTER, text: "-", text_font: schrift_36}}], on_click: [{number.decrement: sollwert}]}
-        - button: {x: 450, y: 65, width: 75, height: 70, widgets: [{label: {align: CENTER, text: "+", text_font: schrift_36}}], on_click: [{number.increment: sollwert}]}
-        - {label: {id: lbl_zustand, x: 35, y: 165, width: 730, height: 56, pad_all: 8, radius: 8, bg_opa: COVER, bg_color: 0x5C677D, text: Verbindung wird aufgebaut, text_font: schrift_36}}
-        - {bar: {id: leistung_bar, x: 560, y: 20, width: 220, height: 40, min_value: 170, max_value: 330, value: 170}}
-        - {label: {x: 560, y: 66, text: "17 ... 33 kW"}}
-        - {label: {id: lbl_fenster, x: 560, y: 96, width: 230, text: ""}}
-        - {label: {id: lbl_reinigung, x: 35, y: 355, text: ""}}
-        - {label: {id: lbl_ofenwerte, x: 35, y: 235, text: "Abgas -- °C   Leistung -- kW"}}
-        - {label: {id: lbl_details, x: 35, y: 275, text: "Kette --   Lüfter --"}}
-        - {label: {id: lbl_warnung, x: 35, y: 320, width: 730, text_color: 0xFFD60A, text: ""}}
-        - button: {x: 15, y: 400, width: 145, height: 65, widgets: [{label: {align: CENTER, text: START}}], on_click: [{lambda: 'auto &d=esphome::ofen_link::display_runtime;lv_label_set_text(id(lbl_startsperre),d.start_erlaubt(id(ofen_bus).status,id(ofen_bus).status_fresh(5000))?"Ofen angezündet? Papier brennt?":d.startsperre(id(ofen_bus).status,id(ofen_bus).status_fresh(5000)).c_str());'}, {lvgl.page.show: start_seite}]}
-        - button: {x: 175, y: 400, width: 145, height: 65, widgets: [{label: {align: CENTER, text: Verlauf}}], on_click: [{lvgl.page.show: verlauf_seite}]}
-        - button: {x: 335, y: 400, width: 200, height: 65, widgets: [{label: {align: CENTER, text: Einstellungen}}], on_click: [{lvgl.page.show: pin_seite}]}
+        - obj:
+            x: 16
+            y: 16
+            width: 352
+            height: 368
+            styles: stil_karte
+            widgets:
+              - {label: {x: 20, y: 16, text: RAUM, styles: stil_kacheltitel}}
+              - {label: {id: lbl_raum, x: 18, y: 52, text: "--,-°", text_font: inter_96}}
+              - {obj: {x: 20, y: 174, width: 312, height: 1, bg_color: "${color_divider}", bg_opa: COVER, border_width: 0}}
+              - {label: {x: 20, y: 198, text: SOLL, styles: stil_kacheltitel}}
+              - button:
+                  x: 20
+                  y: 238
+                  width: 64
+                  height: 64
+                  radius: 32
+                  styles: stil_ghost
+                  widgets: [{label: {align: CENTER, text: "–", text_font: inter_28}}]
+                  on_click: [{number.decrement: sollwert}]
+              - {label: {id: lbl_soll, x: 112, y: 246, width: 104, text: "20.0", text_font: inter_40, text_align: CENTER}}
+              - {label: {x: 215, y: 256, text: "°C", text_font: inter_20, text_color: "${color_secondary}"}}
+              - button:
+                  x: 268
+                  y: 238
+                  width: 64
+                  height: 64
+                  radius: 32
+                  styles: stil_ghost
+                  widgets: [{label: {align: CENTER, text: "+", text_font: inter_28}}]
+                  on_click: [{number.increment: sollwert}]
+              - {label: {id: lbl_warnung, x: 20, y: 326, width: 312, text: "", text_font: inter_14, text_color: "${color_ignition}", long_mode: DOT}}
+        - obj:
+            id: zustand_karte
+            x: 380
+            y: 16
+            width: 404
+            height: 100
+            styles: stil_karte
+            widgets:
+              - {label: {x: 16, y: 14, text: ZUSTAND, styles: stil_kacheltitel}}
+              - {obj: {id: zustand_punkt, x: 18, y: 56, width: 12, height: 12, radius: 6, bg_color: "${color_stop}", bg_opa: COVER, border_width: 0}}
+              - {label: {id: lbl_zustand, x: 44, y: 48, width: 340, text: Verbindung wird aufgebaut, text_font: inter_20, long_mode: DOT}}
+        - obj:
+            x: 380
+            y: 128
+            width: 196
+            height: 122
+            styles: stil_karte
+            widgets:
+              - {label: {x: 16, y: 14, text: LEISTUNG, styles: stil_kacheltitel}}
+              - {label: {id: lbl_leistung, x: 16, y: 40, text: "--.-", text_font: inter_40}}
+              - {label: {x: 124, y: 55, text: kW, text_color: "${color_secondary}"}}
+              - bar:
+                  id: leistung_bar
+                  x: 16
+                  y: 98
+                  width: 164
+                  height: 7
+                  min_value: 170
+                  max_value: 330
+                  value: 170
+                  radius: 4
+                  bg_color: "${color_divider}"
+                  indicator: {bg_color: "${color_running}", radius: 4}
+        - obj:
+            x: 588
+            y: 128
+            width: 196
+            height: 122
+            styles: stil_karte
+            widgets:
+              - {label: {x: 16, y: 14, text: ABGAS, styles: stil_kacheltitel}}
+              - {label: {id: lbl_ofenwerte, x: 16, y: 40, text: "--.-", text_font: inter_40}}
+              - {label: {x: 126, y: 55, text: "°C", text_color: "${color_secondary}"}}
+        - obj:
+            x: 380
+            y: 262
+            width: 404
+            height: 122
+            styles: stil_karte
+            widgets:
+              - {obj: {id: kette_punkt, x: 18, y: 22, width: 10, height: 10, radius: 5, bg_color: "${color_stop}", bg_opa: COVER, border_width: 0}}
+              - {label: {id: lbl_details, x: 42, y: 16, width: 330, text: "Sicherheitskette --", text_font: inter_14, long_mode: DOT}}
+              - {obj: {id: luefter_punkt, x: 18, y: 57, width: 10, height: 10, radius: 5, bg_color: "${color_stop}", bg_opa: COVER, border_width: 0}}
+              - {label: {id: lbl_luefter, x: 42, y: 51, text: "Lüfter --", text_font: inter_14}}
+              - {obj: {x: 16, y: 83, width: 372, height: 1, bg_color: "${color_divider}", bg_opa: COVER, border_width: 0}}
+              - {label: {id: lbl_fenster, x: 16, y: 94, width: 226, text: "", text_font: inter_14, text_color: "${color_secondary}", long_mode: DOT}}
+              - {label: {id: lbl_reinigung, x: 246, y: 94, width: 142, text: "", text_font: inter_14, text_color: "${color_secondary}", text_align: RIGHT, long_mode: DOT}}
+        - button: {x: 16, y: 400, width: 128, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Verlauf}}], on_click: [{lvgl.page.show: verlauf_seite}]}
+        - button: {x: 156, y: 400, width: 170, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Einstellungen}}], on_click: [{lvgl.page.show: pin_seite}]}
+        - button:
+            id: btn_start
+            x: 338
+            y: 400
+            width: 142
+            height: 64
+            bg_color: "${color_running}"
+            border_width: 0
+            shadow_width: 0
+            widgets: [{label: {align: CENTER, text: START}}]
+            on_click: [{lambda: 'auto &d=esphome::ofen_link::display_runtime;lv_label_set_text(id(lbl_startsperre),d.start_erlaubt(id(ofen_bus).status,id(ofen_bus).status_fresh(5000))?"Ofen angezündet? Papier brennt?":d.startsperre(id(ofen_bus).status,id(ofen_bus).status_fresh(5000)).c_str());'}, {lvgl.page.show: start_seite}]
     - id: start_seite
       widgets:
-        - {label: {x: 40, y: 35, text: Manueller Start, text_font: schrift_36}}
-        - {label: {id: lbl_startsperre, x: 40, y: 105, width: 700, text: Prüfung läuft}}
-        - button:
-            x: 220
-            y: 195
-            width: 360
-            height: 100
-            bg_color: 0x2A9D8F
-            widgets: [{label: {align: CENTER, text: JA – STARTEN, text_font: schrift_36}}]
-            on_click: [{if: {condition: {lambda: 'return esphome::ofen_link::display_runtime.start_erlaubt(id(ofen_bus).status,id(ofen_bus).status_fresh(5000));'}, then: [{lambda: 'id(ofen_bus).send_cmd(''C'',"START");'}, {lvgl.page.show: uebersicht_seite}]}}]
-        - button: {x: 40, y: 390, width: 150, height: 70, widgets: [{label: {align: CENTER, text: Zurück}}], on_click: [{lvgl.page.show: uebersicht_seite}]}
+        - {label: {x: 32, y: 28, text: Manueller Start, styles: stil_seitentitel}}
+        - obj:
+            x: 32
+            y: 88
+            width: 736
+            height: 264
+            styles: stil_karte
+            widgets:
+              - {label: {x: 24, y: 28, text: STARTFREIGABE, styles: stil_kacheltitel}}
+              - {label: {id: lbl_startsperre, x: 24, y: 72, width: 688, text: Prüfung läuft, text_font: inter_20, text_align: CENTER}}
+              - button:
+                  x: 188
+                  y: 142
+                  width: 360
+                  height: 80
+                  bg_color: "${color_running}"
+                  border_width: 0
+                  shadow_width: 0
+                  widgets: [{label: {align: CENTER, text: "JA – STARTEN", text_font: inter_20, text_color: "${color_bg}"}}]
+                  on_click: [{if: {condition: {lambda: 'return esphome::ofen_link::display_runtime.start_erlaubt(id(ofen_bus).status,id(ofen_bus).status_fresh(5000));'}, then: [{lambda: 'id(ofen_bus).send_cmd(''C'',"START");'}, {lvgl.page.show: uebersicht_seite}]}}]
+        - button: {x: 32, y: 400, width: 144, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Zurück}}], on_click: [{lvgl.page.show: uebersicht_seite}]}
     - id: alarm_seite
-      bg_color: 0x8B0000
+      bg_color: 0x7F1D1D
       widgets:
-        - {label: {x: 35, y: 25, text: ALARM, text_font: schrift_60}}
-        - {label: {id: lbl_alarm, x: 35, y: 120, width: 720, text: Alarm, text_font: schrift_36}}
-        - {label: {id: lbl_alarm_hinweis, x: 35, y: 185, width: 720, text: Ursache prüfen}}
-        - button: {x: 250, y: 300, width: 300, height: 80, widgets: [{label: {align: CENTER, text: QUITTIEREN}}], on_click: [{lambda: 'id(ofen_bus).send_cmd(''C'',"ACK");'}]}
+        - {label: {x: 32, y: 26, text: ALARM, text_font: inter_28}}
+        - obj:
+            x: 32
+            y: 82
+            width: 736
+            height: 300
+            bg_color: 0x991B1B
+            bg_opa: COVER
+            border_color: 0xB91C1C
+            border_width: 1
+            radius: 16
+            shadow_width: 0
+            widgets:
+              - {label: {x: 24, y: 22, text: URSACHE, text_font: inter_14, text_letter_space: 2, text_color: 0xFECACA}}
+              - {label: {id: lbl_alarm, x: 24, y: 54, width: 688, text: Alarm, text_font: inter_28}}
+              - {obj: {x: 24, y: 108, width: 688, height: 1, bg_color: 0xB91C1C, bg_opa: COVER, border_width: 0}}
+              - {label: {x: 24, y: 128, text: NÄCHSTE SCHRITTE, text_font: inter_14, text_letter_space: 2, text_color: 0xFECACA}}
+              - {label: {id: lbl_alarm_hinweis, x: 24, y: 160, width: 688, text: Ursache prüfen, text_font: inter_20}}
+              - button:
+                  x: 24
+                  y: 216
+                  width: 276
+                  height: 58
+                  bg_color: "${color_text}"
+                  text_color: 0x7F1D1D
+                  border_width: 0
+                  shadow_width: 0
+                  widgets: [{label: {align: CENTER, text: QUITTIEREN, text_color: 0x7F1D1D}}]
+                  on_click: [{lambda: 'id(ofen_bus).send_cmd(''C'',"ACK");'}]
     - id: verlauf_seite
       on_load:
         - lambda: |-
             auto &d=esphome::ofen_link::display_runtime;
-            if(!d.chart){auto *c=lv_chart_create(id(verlauf_seite)->obj);d.chart=c;lv_obj_set_pos(c,30,65);lv_obj_set_size(c,720,300);
-            lv_chart_set_type(c,LV_CHART_TYPE_LINE);lv_chart_set_point_count(c,288);lv_chart_set_range(c,LV_CHART_AXIS_PRIMARY_Y,0,350);lv_chart_set_range(c,LV_CHART_AXIS_SECONDARY_Y,0,600);
+            if(!d.chart){auto *c=lv_chart_create(id(verlauf_seite)->obj);d.chart=c;lv_obj_set_pos(c,32,76);lv_obj_set_size(c,736,252);
+            lv_obj_set_style_bg_color(c,lv_color_hex(0x141A22),0);lv_obj_set_style_border_color(c,lv_color_hex(0x222B36),0);
+            lv_obj_set_style_border_width(c,1,0);lv_obj_set_style_radius(c,16,0);lv_obj_set_style_line_color(c,lv_color_hex(0x1C2430),LV_PART_MAIN);
+            lv_chart_set_div_line_count(c,5,6);lv_chart_set_type(c,LV_CHART_TYPE_LINE);lv_chart_set_point_count(c,288);lv_chart_set_range(c,LV_CHART_AXIS_PRIMARY_Y,0,350);lv_chart_set_range(c,LV_CHART_AXIS_SECONDARY_Y,0,600);
             lv_obj_set_style_size(c,0,0,LV_PART_INDICATOR);
-            d.chart_raum=lv_chart_add_series(c,lv_color_hex(0x00D4FF),LV_CHART_AXIS_PRIMARY_Y);
-            d.chart_soll=lv_chart_add_series(c,lv_color_hex(0xFFFFFF),LV_CHART_AXIS_PRIMARY_Y);
-            d.chart_abgas=lv_chart_add_series(c,lv_color_hex(0xFF7B00),LV_CHART_AXIS_SECONDARY_Y);
-            d.chart_leistung=lv_chart_add_series(c,lv_color_hex(0x2A9D3F),LV_CHART_AXIS_PRIMARY_Y);
+            d.chart_raum=lv_chart_add_series(c,lv_color_hex(0x38BDF8),LV_CHART_AXIS_PRIMARY_Y);
+            d.chart_soll=lv_chart_add_series(c,lv_color_hex(0xE8ECF1),LV_CHART_AXIS_PRIMARY_Y);
+            d.chart_abgas=lv_chart_add_series(c,lv_color_hex(0xF59E0B),LV_CHART_AXIS_SECONDARY_Y);
+            d.chart_leistung=lv_chart_add_series(c,lv_color_hex(0x22C55E),LV_CHART_AXIS_PRIMARY_Y);
             auto pt=[](int16_t v)->int32_t{return v==INT16_MIN?LV_CHART_POINT_NONE:(int32_t)v;};
             for(int i=0;i<d.hist_count;i++){int k=(d.hist_pos-d.hist_count+i+d.HIST_N)%d.HIST_N;
               lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_raum,pt(d.hist_raum[k]));lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_soll,pt(d.hist_soll[k]));
               lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_abgas,d.hist_abgas[k]==INT16_MIN?LV_CHART_POINT_NONE:d.hist_abgas[k]/10);lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_leistung,pt(d.hist_leistung[k]));}}
       widgets:
-        - {label: {x: 25, y: 10, text: Verlauf 24 Stunden, text_font: schrift_36}}
-        - {label: {x: 200, y: 375, width: 440, text: "Blau Raum, Weiß Soll (0,1 °C), Grün Leistung (0,1 kW), Orange Abgas (°C, rechts)"}}
-        - button: {x: 25, y: 400, width: 150, height: 65, widgets: [{label: {align: CENTER, text: Zurück}}], on_click: [{lvgl.page.show: uebersicht_seite}]}
+        - {label: {x: 32, y: 26, text: Verlauf · 24 Stunden, styles: stil_seitentitel}}
+        - {obj: {x: 40, y: 350, width: 8, height: 8, radius: 4, bg_color: 0x38BDF8, bg_opa: COVER, border_width: 0}}
+        - {label: {x: 56, y: 343, text: Raum, text_font: inter_14, text_color: "${color_secondary}"}}
+        - {obj: {x: 140, y: 350, width: 8, height: 8, radius: 4, bg_color: "${color_text}", bg_opa: COVER, border_width: 0}}
+        - {label: {x: 156, y: 343, text: Soll, text_font: inter_14, text_color: "${color_secondary}"}}
+        - {obj: {x: 232, y: 350, width: 8, height: 8, radius: 4, bg_color: "${color_running}", bg_opa: COVER, border_width: 0}}
+        - {label: {x: 248, y: 343, text: Leistung, text_font: inter_14, text_color: "${color_secondary}"}}
+        - {obj: {x: 366, y: 350, width: 8, height: 8, radius: 4, bg_color: "${color_ignition}", bg_opa: COVER, border_width: 0}}
+        - {label: {x: 382, y: 343, text: Abgas, text_font: inter_14, text_color: "${color_secondary}"}}
+        - button: {x: 32, y: 400, width: 144, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Zurück}}], on_click: [{lvgl.page.show: uebersicht_seite}]}
     - id: pin_seite
       widgets:
-        - {label: {x: 40, y: 30, text: Einstellungen – PIN, text_font: schrift_36}}
-        - {spinbox: {id: pin_spin, x: 250, y: 120, width: 300, height: 70, range_from: 0, range_to: 9999, digits: 4, value: 0, text_align: CENTER}}
-        - button: {x: 250, y: 220, width: 300, height: 75, widgets: [{label: {align: CENTER, text: ÖFFNEN}}], on_click: [{if: {condition: {lambda: 'return lv_spinbox_get_value(id(pin_spin))==(int)id(pin_code).state;'}, then: [{lambda: 'id(pin_freigabe_bis)=millis()+300000UL;'}, {lvgl.page.show: einstellung_seite}]}}]}
-        - button: {x: 40, y: 390, width: 150, height: 70, widgets: [{label: {align: CENTER, text: Zurück}}], on_click: [{lvgl.page.show: uebersicht_seite}]}
+        - {label: {x: 32, y: 28, text: Einstellungen, styles: stil_seitentitel}}
+        - {label: {x: 32, y: 72, text: PIN EINGEBEN, styles: stil_kacheltitel}}
+        - {spinbox: {id: pin_spin, x: 250, y: 128, width: 300, height: 72, range_from: 0, range_to: 9999, digits: 4, value: 0, text_align: CENTER, text_font: inter_40}}
+        - button: {x: 250, y: 224, width: 300, height: 72, bg_color: "${color_running}", border_width: 0, widgets: [{label: {align: CENTER, text: ÖFFNEN}}], on_click: [{if: {condition: {lambda: 'return lv_spinbox_get_value(id(pin_spin))==(int)id(pin_code).state;'}, then: [{lambda: 'id(pin_freigabe_bis)=millis()+300000UL;'}, {lvgl.page.show: einstellung_seite}]}}]}
+        - button: {x: 32, y: 400, width: 144, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Zurück}}], on_click: [{lvgl.page.show: uebersicht_seite}]}
     - id: einstellung_seite
       on_load: [{if: {condition: {lambda: 'return millis()>id(pin_freigabe_bis);'}, then: [{lvgl.page.show: pin_seite}]}}]
       widgets:
-        - {label: {x: 25, y: 10, text: Einstellungen, text_font: schrift_36}}
-        - {label: {x: 30, y: 75, width: 740, text: "Zeitprogramm (pro Tag bis 4 Fenster, z. B. 06:00-08:00=21), Absenkung, Kp/Ti, Öldichte, Bildschirmschoner und Push stellst du im Webinterface ein."}}
-        - {label: {id: lbl_info, x: 30, y: 140, width: 740, text: ""}}
-        - button: {x: 30, y: 220, width: 250, height: 80, widgets: [{label: {align: CENTER, text: Kalibrierung}}], on_click: [{lvgl.page.show: kal_seite}]}
-        - button: {x: 300, y: 220, width: 270, height: 80, widgets: [{label: {align: CENTER, text: Reinigung Reset}}], on_click: [{button.press: reinigung_reset}]}
-        - button: {x: 30, y: 395, width: 150, height: 65, widgets: [{label: {align: CENTER, text: Zurück}}], on_click: [{lvgl.page.show: uebersicht_seite}]}
+        - {label: {x: 32, y: 28, text: Einstellungen, styles: stil_seitentitel}}
+        - obj:
+            x: 32
+            y: 82
+            width: 736
+            height: 266
+            styles: stil_karte
+            widgets:
+              - {label: {x: 20, y: 18, text: SYSTEM, styles: stil_kacheltitel}}
+              - {label: {x: 20, y: 50, width: 696, text: "Zeitprogramm, Absenkung, Reglerwerte, Öldichte, Bildschirmschoner und Push-Nachrichten werden im Webinterface verwaltet.", text_font: inter_20}}
+              - {obj: {x: 20, y: 124, width: 696, height: 1, bg_color: "${color_divider}", bg_opa: COVER, border_width: 0}}
+              - {label: {id: lbl_info, x: 20, y: 144, width: 696, text: "", text_font: inter_14, text_color: "${color_secondary}"}}
+              - button: {x: 436, y: 180, width: 260, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Kalibrierung}}], on_click: [{lvgl.page.show: kal_seite}]}
+              - button: {x: 20, y: 180, width: 260, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Reinigung Reset}}], on_click: [{button.press: reinigung_reset}]}
+        - button: {x: 32, y: 400, width: 144, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Zurück}}], on_click: [{lvgl.page.show: uebersicht_seite}]}
     - id: kal_seite
       widgets:
-        - {label: {x: 25, y: 10, text: Kalibrierassistent, text_font: schrift_36}}
-        - {label: {x: 30, y: 70, width: 710, text: "Pumpe: 5 Stufen à 3 min, danach Menge in ml eingeben. STOPP bricht jederzeit ab."}}
+        - {label: {x: 32, y: 28, text: Kalibrierassistent, styles: stil_seitentitel}}
+        - {label: {x: 32, y: 72, width: 736, text: "Pumpe: fünf Stufen à 3 min, danach Menge eingeben. STOPP bricht jederzeit ab.", text_font: inter_14, text_color: "${color_secondary}"}}
+        - button: {x: 32, y: 112, width: 226, height: 72, styles: stil_ghost, widgets: [{label: {align: CENTER, text: PUMPE MESSEN}}], on_click: [{lvgl.page.show: kal_bestaetigung_seite}]}
+        - button: {x: 274, y: 112, width: 226, height: 72, styles: stil_ghost, widgets: [{label: {align: CENTER, text: FLAMME LERNEN}}], on_click: [{lambda: 'auto &d=esphome::ofen_link::display_runtime;if(id(ofen_bus).status.state==(long)ofen::State::BETRIEB){d.kal=esphome::ofen_link::DisplayRuntime::KalSchritt::FLAMME;d.kal_start_ms=millis();d.flamme_summe=0;d.flamme_n=0;}'}]}
+        - button: {x: 516, y: 112, width: 252, height: 72, styles: stil_ghost, widgets: [{label: {align: CENTER, text: SPRUNGTEST}}], on_click: [{lambda: 'auto &d=esphome::ofen_link::display_runtime;if(id(ofen_bus).status.state==(long)ofen::State::BETRIEB&&millis()-d.betrieb_seit_ms>=3600000UL){d.kal=esphome::ofen_link::DisplayRuntime::KalSchritt::SPRUNG;d.kal_start_ms=millis();d.sprung_n=0;}else d.meldung="Sprungtest erst nach 60 min Betrieb";'}]}
+        - {label: {x: 32, y: 216, text: GEMESSENE ÖLMENGE · ML, styles: stil_kacheltitel}}
+        - {spinbox: {id: kal_ml_spin, x: 32, y: 246, width: 180, height: 70, range_from: 0, range_to: 2000, digits: 4, value: 0, text_align: CENTER}}
         - button:
-            x: 30
-            y: 190
-            width: 220
-            height: 80
-            widgets: [{label: {align: CENTER, text: PUMPE MESSEN}}]
-            on_click: [{lvgl.page.show: kal_bestaetigung_seite}]
-        - button: {x: 270, y: 190, width: 220, height: 80, widgets: [{label: {align: CENTER, text: FLAMME LERNEN}}], on_click: [{lambda: 'auto &d=esphome::ofen_link::display_runtime;if(id(ofen_bus).status.state==(long)ofen::State::BETRIEB){d.kal=esphome::ofen_link::DisplayRuntime::KalSchritt::FLAMME;d.kal_start_ms=millis();d.flamme_summe=0;d.flamme_n=0;}'}]}
-        - button: {x: 510, y: 190, width: 220, height: 80, widgets: [{label: {align: CENTER, text: SPRUNGTEST}}], on_click: [{lambda: 'auto &d=esphome::ofen_link::display_runtime;if(id(ofen_bus).status.state==(long)ofen::State::BETRIEB&&millis()-d.betrieb_seit_ms>=3600000UL){d.kal=esphome::ofen_link::DisplayRuntime::KalSchritt::SPRUNG;d.kal_start_ms=millis();d.sprung_n=0;}else d.meldung="Sprungtest erst nach 60 min Betrieb";'}]}
-        - {spinbox: {id: kal_ml_spin, x: 30, y: 300, width: 180, height: 70, range_from: 0, range_to: 2000, digits: 4, value: 0, text_align: CENTER}}
-        - button:
-            x: 230
-            y: 300
+            x: 228
+            y: 246
             width: 220
             height: 70
+            styles: stil_ghost
             widgets: [{label: {align: CENTER, text: WERT SPEICHERN}}]
             on_click:
               - lambda: |-
@@ -507,10 +713,12 @@ lvgl:
                   if(d.kal_stufe<5){d.stufe_start_ms=millis();id(ofen_bus).send_cmd('C',"KAL",std::to_string(lroundf(d.kal_pwm[d.kal_stufe]*1000)));}
                   else{id(ofen_bus).send_cmd('C',"STOP");d.pumpe_auswerten(id(oeldichte).state);d.kal=esphome::ofen_link::DisplayRuntime::KalSchritt::AUS;d.meldung=std::isnan(d.neu_min_pwm)?"Pumpenmessung nicht plausibel":"Pumpenkennlinie berechnet – ÜBERNEHMEN drücken";}
         - button:
-            x: 470
-            y: 300
+            x: 464
+            y: 246
             width: 160
             height: 70
+            bg_color: "${color_running}"
+            border_width: 0
             widgets: [{label: {align: CENTER, text: ÜBERNEHMEN}}]
             on_click:
               - lambda: |-
@@ -518,20 +726,31 @@ lvgl:
                   if(!std::isnan(d.neu_min_pwm)){id(ofen_bus).send_cmd('K',"min_pwm",std::to_string(d.neu_min_pwm));id(ofen_bus).send_cmd('K',"max_pwm",std::to_string(d.neu_max_pwm));d.alt_min_pwm=d.neu_min_pwm;d.alt_max_pwm=d.neu_max_pwm;d.neu_min_pwm=d.neu_max_pwm=NAN;}
                   if(!std::isnan(d.neu_flamme)){id(ofen_bus).send_cmd('K',"flamme_aus_c",std::to_string(d.neu_flamme));d.alt_flamme=d.neu_flamme;d.neu_flamme=NAN;}
                   if(d.sprung_ergebnis.ok){id(kp).publish_state(d.sprung_ergebnis.kp);id(ti).publish_state(d.sprung_ergebnis.ti_min);d.sprung_ergebnis.ok=false;}
-        - button: {x: 640, y: 300, width: 145, height: 70, widgets: [{label: {align: CENTER, text: ALT}}], on_click: [{lambda: 'auto &d=esphome::ofen_link::display_runtime;id(ofen_bus).send_cmd(''K'',"min_pwm",std::to_string(d.alt_min_pwm));id(ofen_bus).send_cmd(''K'',"max_pwm",std::to_string(d.alt_max_pwm));id(ofen_bus).send_cmd(''K'',"flamme_aus_c",std::to_string(d.alt_flamme));'}]}
-        - button: {x: 30, y: 395, width: 150, height: 65, widgets: [{label: {align: CENTER, text: Zurück}}], on_click: [{lvgl.page.show: einstellung_seite}]}
+        - button: {x: 640, y: 246, width: 128, height: 70, styles: stil_ghost, widgets: [{label: {align: CENTER, text: ALT}}], on_click: [{lambda: 'auto &d=esphome::ofen_link::display_runtime;id(ofen_bus).send_cmd(''K'',"min_pwm",std::to_string(d.alt_min_pwm));id(ofen_bus).send_cmd(''K'',"max_pwm",std::to_string(d.alt_max_pwm));id(ofen_bus).send_cmd(''K'',"flamme_aus_c",std::to_string(d.alt_flamme));'}]}
+        - button: {x: 32, y: 400, width: 144, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Zurück}}], on_click: [{lvgl.page.show: einstellung_seite}]}
     - id: kal_bestaetigung_seite
       widgets:
-        - {label: {x: 40, y: 35, text: Pumpe ohne Flamme, text_font: schrift_36}}
-        - {label: {x: 40, y: 100, width: 720, text: "Ofen ist kalt. Die Ölleitung ist vom Brenner gelöst und steckt im Messbecher. Die Pumpe läuft 5 Stufen à 3 min, STOPP bricht jederzeit ab."}}
-        - button:
-            x: 170
-            y: 230
-            width: 460
-            height: 100
-            bg_color: 0xE76F00
-            widgets: [{label: {align: CENTER, text: "JA, LEITUNG IM BECHER", text_font: schrift_36}}]
-            on_click:
-              - lambda: 'auto &d=esphome::ofen_link::display_runtime;if(d.start_erlaubt(id(ofen_bus)->status,id(ofen_bus)->status_fresh(5000))){d.kal=esphome::ofen_link::DisplayRuntime::KalSchritt::PUMPE;d.kal_start_ms=d.stufe_start_ms=millis();d.kal_stufe=0;d.kal_wartet_ml=false;id(ofen_bus)->send_cmd(''C'',"KAL","300");}else d.meldung=d.startsperre(id(ofen_bus)->status,id(ofen_bus)->status_fresh(5000));'
-              - lvgl.page.show: kal_seite
-        - button: {x: 40, y: 390, width: 160, height: 70, widgets: [{label: {align: CENTER, text: Abbrechen}}], on_click: [{lvgl.page.show: kal_seite}]}
+        - {label: {x: 32, y: 28, text: Pumpe ohne Flamme, styles: stil_seitentitel, text_color: "${color_ignition}"}}
+        - obj:
+            x: 32
+            y: 82
+            width: 736
+            height: 278
+            styles: stil_karte
+            border_color: "${color_ignition}"
+            widgets:
+              - {label: {x: 24, y: 24, text: ACHTUNG, text_font: inter_14, text_letter_space: 2, text_color: "${color_ignition}"}}
+              - {label: {x: 24, y: 58, width: 688, text: "Ofen ist kalt. Die Ölleitung ist vom Brenner gelöst und steckt im Messbecher. Die Pumpe läuft fünf Stufen à 3 min. STOPP bricht jederzeit ab.", text_font: inter_20}}
+              - button:
+                  x: 138
+                  y: 166
+                  width: 460
+                  height: 80
+                  bg_color: "${color_ignition}"
+                  border_width: 0
+                  shadow_width: 0
+                  widgets: [{label: {align: CENTER, text: "JA, LEITUNG IM BECHER", text_color: "${color_bg}"}}]
+                  on_click:
+                    - lambda: 'auto &d=esphome::ofen_link::display_runtime;if(d.start_erlaubt(id(ofen_bus)->status,id(ofen_bus)->status_fresh(5000))){d.kal=esphome::ofen_link::DisplayRuntime::KalSchritt::PUMPE;d.kal_start_ms=d.stufe_start_ms=millis();d.kal_stufe=0;d.kal_wartet_ml=false;id(ofen_bus)->send_cmd(''C'',"KAL","300");}else d.meldung=d.startsperre(id(ofen_bus)->status,id(ofen_bus)->status_fresh(5000));'
+                    - lvgl.page.show: kal_seite
+        - button: {x: 32, y: 400, width: 144, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Abbrechen}}], on_click: [{lvgl.page.show: kal_seite}]}
