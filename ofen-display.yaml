@@ -78,6 +78,8 @@ display:
     model: ESP32-S3-TOUCH-LCD-7-800X480
     # Standard 16 MHz ist für PSRAM + WLAN grenzwertig (Flackern); 14 MHz ≈ 33 Bilder/s
     pclk_frequency: 14MHz
+    # Nur die Panel-Versorgung (EXIO6); die Beleuchtung (EXIO2) schaltet der Schalter "hintergrundlicht"
+    enable_pin: [{ch422g: io_expander, number: 6}]
     id: display_panel
     update_interval: never
     auto_clear_enabled: false
@@ -87,8 +89,14 @@ touchscreen:
     display: display_panel
     interrupt_pin: GPIO4
     reset_pin: {ch422g: io_expander, number: 1}
-    on_touch:
-      - lvgl.resume:
+    # Aufwecken erst beim Loslassen: die Weck-Berührung löst so keinen Knopf aus (ESPHome-Muster)
+    on_release:
+      - if:
+          condition: lvgl.is_paused
+          then:
+            - switch.turn_on: hintergrundlicht
+            - lvgl.resume:
+            - lvgl.widget.redraw:
 
 font:
   - {file: {type: gfonts, family: Inter, weight: 300}, id: inter_96, size: 96, bpp: 4, glyphsets: [GF_Latin_Kernel], glyphs: "äöüÄÖÜß°–…×àé·"}
@@ -191,9 +199,34 @@ number:
     entity_category: config
     web_server: {sorting_group_id: web_einstellung, sorting_weight: 90}
   - platform: template
+    id: nacht_von_h
+    name: Nachtmodus ab
+    unit_of_measurement: Uhr
+    min_value: 0
+    max_value: 23
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 22
+    web_server: {sorting_group_id: web_einstellung, sorting_weight: 44}
+    on_value: [{lambda: 'if(id(lbl_nacht_von)==nullptr)return;char b[8];snprintf(b,sizeof(b),"%.0f",x);lv_label_set_text(id(lbl_nacht_von),b);'}]
+  - platform: template
+    id: nacht_bis_h
+    name: Nachtmodus bis
+    unit_of_measurement: Uhr
+    min_value: 0
+    max_value: 23
+    step: 1
+    restore_value: true
+    optimistic: true
+    initial_value: 6
+    web_server: {sorting_group_id: web_einstellung, sorting_weight: 45}
+    on_value: [{lambda: 'if(id(lbl_nacht_bis)==nullptr)return;char b[8];snprintf(b,sizeof(b),"%.0f",x);lv_label_set_text(id(lbl_nacht_bis),b);'}]
+  - platform: template
     id: screensaver_min
-    name: Bildschirmschoner
+    name: Display aus nach
     unit_of_measurement: min
+    on_value: [{lambda: 'if(id(lbl_aus_nach)==nullptr)return;char b[16];snprintf(b,sizeof(b),"%.0f min",x);lv_label_set_text(id(lbl_aus_nach),b);'}]
     min_value: 1
     max_value: 60
     step: 1
@@ -222,6 +255,29 @@ text:
   - {platform: template, id: prog_so, name: "Zeitprogramm So", mode: text, optimistic: true, restore_value: true, initial_value: "", max_length: 64, web_server: {sorting_group_id: web_einstellung, sorting_weight: 12}, on_value: [{lambda: 'esphome::ofen_link::display_runtime.set_tag(6,x);'}]}
 
 switch:
+  - platform: gpio
+    id: hintergrundlicht
+    pin: {ch422g: io_expander, number: 2}
+    restore_mode: ALWAYS_ON
+    internal: true  # nur über "Display aus" bzw. Berühren schalten, sonst weckt Berühren nicht
+  - platform: template
+    id: auto_aus_an
+    name: Display automatisch aus
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    web_server: {sorting_group_id: web_einstellung, sorting_weight: 40}
+  - platform: template
+    id: nachtmodus_an
+    name: Nachtmodus (aus nach 30 s)
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    web_server: {sorting_group_id: web_einstellung, sorting_weight: 43}
+  - platform: template
+    id: wach_bei_anlauf
+    name: Display an beim Anzünden und Anlauf
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    web_server: {sorting_group_id: web_einstellung, sorting_weight: 46}
   - platform: template
     id: zeitprogramm_an
     name: Wochenprogramm
@@ -299,6 +355,11 @@ text_sensor:
     web_server: {sorting_group_id: web_bedienung, sorting_weight: 1}
 
 button:
+  - platform: template
+    id: display_aus
+    name: Display jetzt ausschalten
+    web_server: {sorting_group_id: web_einstellung, sorting_weight: 47}
+    on_press: [{lvgl.page.show: uebersicht_seite}, {switch.turn_off: hintergrundlicht}, {lvgl.pause: {show_snow: false}}]
   - platform: template
     id: web_start
     name: START – angezündet und bestätigt
@@ -391,7 +452,7 @@ interval:
           if(frisch&&bus.status.state==(long)ofen::State::ALARM){set_text(id(lbl_alarm),ofen::alarm_text((ofen::Alarm)bus.status.alarm));set_text(id(lbl_alarm_hinweis),ofen::alarm_hint((ofen::Alarm)bus.status.alarm));}
       - if:
           condition: {lambda: 'return id(ofen_bus)->status_fresh(5000)&&id(ofen_bus)->status.state==(long)ofen::State::ALARM&&!id(alarm_seite)->is_showing();'}
-          then: [lvgl.resume:, {lvgl.page.show: alarm_seite}]
+          then: [{switch.turn_on: hintergrundlicht}, lvgl.resume:, {lvgl.page.show: alarm_seite}]
       - if:
           condition: {lambda: 'return id(alarm_seite)->is_showing()&&!(id(ofen_bus)->status_fresh(5000)&&id(ofen_bus)->status.state==(long)ofen::State::ALARM);'}
           then: [{lvgl.page.show: uebersicht_seite}]
@@ -500,8 +561,19 @@ lvgl:
           widgets: [{label: {align: CENTER, text: STOPP, text_font: inter_20}}]
           on_click: [{button.press: stopp}]
   on_idle:
-    - timeout: !lambda 'return (uint32_t)id(screensaver_min).state*60000UL;'
-      then: [{lvgl.pause: {show_snow: false}}]
+    - timeout: !lambda |-
+        const uint32_t NIE=0xFFFFFFFFu;
+        if(!id(auto_aus_an).state)return NIE;
+        auto &st=id(ofen_bus)->status;
+        if(id(wach_bei_anlauf).state&&id(ofen_bus)->status_fresh(5000)&&(st.state==(long)ofen::State::ANZUENDEN||st.state==(long)ofen::State::ANLAUF))return NIE;
+        auto n=id(netzzeit).now();
+        if(id(nachtmodus_an).state&&n.is_valid()){
+          int h=n.hour,v=(int)id(nacht_von_h).state,b=(int)id(nacht_bis_h).state;
+          if(v<b?(h>=v&&h<b):(h>=v||h<b))return 30000u;  // Zeitraum darf über Mitternacht gehen
+        }
+        return (uint32_t)id(screensaver_min).state*60000UL;
+      # Display aus: Übersicht vorbereiten, Beleuchtung aus, Zeichnen anhalten. Berühren weckt (siehe touchscreen).
+      then: [{button.press: display_aus}]
   pages:
     - id: uebersicht_seite
       widgets:
@@ -777,12 +849,48 @@ lvgl:
             styles: stil_karte
             widgets:
               - {label: {x: 20, y: 18, text: SYSTEM, styles: stil_kacheltitel}}
-              - {label: {x: 20, y: 50, width: 696, text: "Zeitprogramm, Absenkung, Reglerwerte, Öldichte, Bildschirmschoner und Push-Nachrichten werden im Webinterface verwaltet.", text_font: inter_20}}
+              - {label: {x: 20, y: 50, width: 696, text: "Zeitprogramm, Absenkung, Reglerwerte, Öldichte und Push-Nachrichten werden im Webinterface verwaltet.", text_font: inter_20}}
               - {obj: {x: 20, y: 124, width: 696, height: 1, bg_color: "${color_divider}", bg_opa: COVER, border_width: 0}}
               - {label: {id: lbl_info, x: 20, y: 144, width: 696, text: "", text_font: inter_14, text_color: "${color_secondary}"}}
-              - button: {x: 436, y: 180, width: 260, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Kalibrierung}}], on_click: [{lvgl.page.show: kal_seite}]}
-              - button: {x: 20, y: 180, width: 260, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Reinigung Reset}}], on_click: [{button.press: reinigung_reset}]}
+              - button: {x: 20, y: 180, width: 216, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Display}}], on_click: [{lvgl.page.show: display_seite}]}
+              - button: {x: 260, y: 180, width: 216, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Kalibrierung}}], on_click: [{lvgl.page.show: kal_seite}]}
+              - button: {x: 500, y: 180, width: 216, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Reinigung Reset}}], on_click: [{button.press: reinigung_reset}]}
         - button: {x: 32, y: 400, width: 144, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Zurück}}], on_click: [{lvgl.page.show: uebersicht_seite}]}
+    - id: display_seite
+      on_load: [{lambda: 'auto setz=[](lv_obj_t *o,bool an){if(an)lv_obj_add_state(o,LV_STATE_CHECKED);else lv_obj_remove_state(o,LV_STATE_CHECKED);};setz(id(sw_auto_aus),id(auto_aus_an).state);setz(id(sw_nacht),id(nachtmodus_an).state);setz(id(sw_anlauf),id(wach_bei_anlauf).state);char b[16];snprintf(b,sizeof(b),"%.0f min",id(screensaver_min).state);lv_label_set_text(id(lbl_aus_nach),b);snprintf(b,sizeof(b),"%.0f",id(nacht_von_h).state);lv_label_set_text(id(lbl_nacht_von),b);snprintf(b,sizeof(b),"%.0f",id(nacht_bis_h).state);lv_label_set_text(id(lbl_nacht_bis),b);'}]
+      widgets:
+        - {label: {x: 32, y: 28, text: Display, styles: stil_seitentitel}}
+        - obj:
+            x: 32
+            y: 82
+            width: 736
+            height: 302
+            styles: stil_karte
+            widgets:
+              - {label: {x: 20, y: 30, text: "Automatisch ausschalten", text_font: inter_20}}
+              - switch: {id: sw_auto_aus, x: 636, y: 20, width: 80, height: 44, bg_color: "${color_border}", indicator: {checked: {bg_color: "${color_running}"}}, on_change: [{lambda: 'if(x)id(auto_aus_an).turn_on();else id(auto_aus_an).turn_off();'}]}
+              - {obj: {x: 20, y: 76, width: 696, height: 1, bg_color: "${color_divider}", bg_opa: COVER, border_width: 0}}
+              - {label: {x: 20, y: 102, text: "Aus nach", text_font: inter_20}}
+              - button: {x: 456, y: 86, width: 60, height: 60, radius: 30, styles: stil_ghost, widgets: [{label: {align: CENTER, text: "-", text_font: inter_28}}], on_click: [{number.set: {id: screensaver_min, value: !lambda 'static const int st[7]={1,2,5,10,15,30,60};int v=(int)id(screensaver_min).state,i=0;while(i<6&&st[i]<v)i++;return st[i>0?i-1:0];'}}]}
+              - {label: {id: lbl_aus_nach, x: 516, y: 102, width: 140, text_align: CENTER, text: "10 min", text_font: inter_20}}
+              - button: {x: 656, y: 86, width: 60, height: 60, radius: 30, styles: stil_ghost, widgets: [{label: {align: CENTER, text: "+", text_font: inter_28}}], on_click: [{number.set: {id: screensaver_min, value: !lambda 'static const int st[7]={1,2,5,10,15,30,60};int v=(int)id(screensaver_min).state,i=0;while(i<6&&st[i]<v)i++;if(i<6&&st[i]==v)i++;return st[i>6?6:i];'}}]}
+              - {obj: {x: 20, y: 148, width: 696, height: 1, bg_color: "${color_divider}", bg_opa: COVER, border_width: 0}}
+              - {label: {x: 20, y: 174, text: "Nachts 30 s", text_font: inter_20}}
+              - switch: {id: sw_nacht, x: 150, y: 164, width: 80, height: 44, bg_color: "${color_border}", indicator: {checked: {bg_color: "${color_running}"}}, on_change: [{lambda: 'if(x)id(nachtmodus_an).turn_on();else id(nachtmodus_an).turn_off();'}]}
+              - button: {x: 256, y: 158, width: 60, height: 60, radius: 30, styles: stil_ghost, widgets: [{label: {align: CENTER, text: "-", text_font: inter_28}}], on_click: [{number.set: {id: nacht_von_h, value: !lambda 'return ((int)id(nacht_von_h).state+23)%24;'}}]}
+              - {label: {id: lbl_nacht_von, x: 316, y: 174, width: 60, text_align: CENTER, text: "22", text_font: inter_20}}
+              - button: {x: 376, y: 158, width: 60, height: 60, radius: 30, styles: stil_ghost, widgets: [{label: {align: CENTER, text: "+", text_font: inter_28}}], on_click: [{number.set: {id: nacht_von_h, value: !lambda 'return ((int)id(nacht_von_h).state+1)%24;'}}]}
+              - {label: {x: 444, y: 174, text: "bis", text_font: inter_20, text_color: "${color_secondary}"}}
+              - button: {x: 496, y: 158, width: 60, height: 60, radius: 30, styles: stil_ghost, widgets: [{label: {align: CENTER, text: "-", text_font: inter_28}}], on_click: [{number.set: {id: nacht_bis_h, value: !lambda 'return ((int)id(nacht_bis_h).state+23)%24;'}}]}
+              - {label: {id: lbl_nacht_bis, x: 556, y: 174, width: 60, text_align: CENTER, text: "6", text_font: inter_20}}
+              - button: {x: 616, y: 158, width: 60, height: 60, radius: 30, styles: stil_ghost, widgets: [{label: {align: CENTER, text: "+", text_font: inter_28}}], on_click: [{number.set: {id: nacht_bis_h, value: !lambda 'return ((int)id(nacht_bis_h).state+1)%24;'}}]}
+              - {label: {x: 676, y: 178, text: "Uhr", text_font: inter_14, text_color: "${color_secondary}"}}
+              - {obj: {x: 20, y: 220, width: 696, height: 1, bg_color: "${color_divider}", bg_opa: COVER, border_width: 0}}
+              - {label: {x: 20, y: 246, text: "An lassen beim Anzünden/Anlauf", text_font: inter_20}}
+              - switch: {id: sw_anlauf, x: 636, y: 236, width: 80, height: 44, bg_color: "${color_border}", indicator: {checked: {bg_color: "${color_running}"}}, on_change: [{lambda: 'if(x)id(wach_bei_anlauf).turn_on();else id(wach_bei_anlauf).turn_off();'}]}
+        - button: {x: 32, y: 400, width: 144, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Zurück}}], on_click: [{lvgl.page.show: einstellung_seite}]}
+        - button: {x: 192, y: 400, width: 200, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Jetzt aus}}], on_click: [{button.press: display_aus}]}
+        - {label: {x: 408, y: 412, width: 220, text: "Alarm weckt das Display immer.", text_font: inter_14, text_color: "${color_secondary}"}}
     - id: kal_seite
       widgets:
         - {label: {x: 32, y: 28, text: Kalibrierassistent, styles: stil_seitentitel}}

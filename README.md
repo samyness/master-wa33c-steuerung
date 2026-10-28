@@ -124,9 +124,19 @@ einer Heizzeit „Heizzeit beginnt – Ofen anzünden?“ (auch per Push), start
 kommen bei jedem Alarm, wenn der Raumfühler fehlt und wenn eine Heizzeit beginnt. Abschaltbar über den Schalter
 „Push-Nachrichten“.
 
-**Helligkeit:** Die Hintergrundbeleuchtung dieses Boards hängt an einem digitalen Ausgang des CH422G und lässt
-sich nur ein- und ausschalten. Deshalb gibt es nur den Bildschirmschoner (Display aus nach X Minuten,
-Berühren weckt).
+**Display aus / Aufwecken:** Unter **Einstellungen → Display** (und im Webinterface):
+
+| Einstellung | Wirkung |
+| --- | --- |
+| Automatisch ausschalten | Beleuchtung nach „Aus nach“ ohne Berührung aus (Standard an) |
+| Aus nach | 1, 2, 5, 10, 15, 30 oder 60 min (Standard 10 min) |
+| Nachts 30 s, von … bis … Uhr | In diesem Zeitraum schon nach 30 s aus (Standard aus, 22–6 Uhr) |
+| An lassen beim Anzünden/Anlauf | Während du den Ofen hochfährst, bleibt das Display an (Standard an) |
+| Jetzt aus | Sofort dunkel |
+
+Eine Berührung weckt das Display. Diese Weck-Berührung löst keinen Knopf aus. Ein Alarm schaltet das Display
+immer ein. Stufenlos dimmen geht nicht, weil die Beleuchtung dieses Boards an einem digitalen Ausgang des CH422G
+hängt und nur an/aus kann.
 
 ## 6. Zustände und Alarme
 
