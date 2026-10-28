@@ -417,13 +417,19 @@ interval:
           then:
             - lambda: esphome::ofen_link::display_runtime.meldung="Heizzeit beginnt – Ofen anzünden?";
             - script.execute: {id: push, titel: "Heizzeit beginnt", nachricht: "Heizzeit beginnt – Ofen anzünden?"}
-  - interval: 5min
+  # Verlauf: erster Punkt 1 min nach dem Start, danach alle 5 min (288 Punkte = 24 h)
+  - interval: 1min
     then:
       - lambda: |-
-          auto &d=esphome::ofen_link::display_runtime;auto &s=id(ofen_bus).status;d.history(id(raum_temp).state,d.soll_c,s.abgas_c,s.kw);
-          if(d.chart){auto *c=(lv_obj_t*)d.chart;lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_raum,std::isnan(id(raum_temp).state)?LV_CHART_POINT_NONE:lroundf(id(raum_temp).state*10));
-          lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_soll,lroundf(d.soll_c*10));lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_abgas,std::isnan(s.abgas_c)?LV_CHART_POINT_NONE:lroundf(s.abgas_c));
-          lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_leistung,lroundf(s.kw*10));}
+          static uint32_t n=0;if(n++%5!=0)return;
+          auto &d=esphome::ofen_link::display_runtime;auto &s=id(ofen_bus).status;
+          bool frisch=id(ofen_bus).status_fresh(5000);float abgas=frisch?s.abgas_c:NAN,kw=frisch?s.kw:NAN;
+          d.history(id(raum_temp).state,d.soll_c,abgas,kw);
+          if(d.hist_count>=2)lv_obj_add_flag(id(lbl_verlauf_leer),LV_OBJ_FLAG_HIDDEN);
+          if(d.chart){auto *c=(lv_obj_t*)d.chart;auto pt=[](float v,float f)->int32_t{return std::isnan(v)?LV_CHART_POINT_NONE:lroundf(v*f);};
+          lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_raum,pt(id(raum_temp).state,10));
+          lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_soll,pt(d.soll_c,10));lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_abgas,pt(abgas,1));
+          lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_leistung,pt(kw,10));}
 
 lvgl:
   displays: [display_panel]
@@ -649,7 +655,7 @@ lvgl:
             lv_obj_set_style_bg_color(c,lv_color_hex(0x141A22),0);lv_obj_set_style_border_color(c,lv_color_hex(0x222B36),0);
             lv_obj_set_style_border_width(c,1,0);lv_obj_set_style_radius(c,16,0);lv_obj_set_style_line_color(c,lv_color_hex(0x1C2430),LV_PART_MAIN);
             lv_chart_set_div_line_count(c,5,6);lv_chart_set_type(c,LV_CHART_TYPE_LINE);lv_chart_set_point_count(c,288);lv_chart_set_range(c,LV_CHART_AXIS_PRIMARY_Y,0,350);lv_chart_set_range(c,LV_CHART_AXIS_SECONDARY_Y,0,600);
-            lv_obj_set_style_size(c,0,0,LV_PART_INDICATOR);
+            lv_obj_set_style_size(c,4,4,LV_PART_INDICATOR);
             d.chart_raum=lv_chart_add_series(c,lv_color_hex(0x38BDF8),LV_CHART_AXIS_PRIMARY_Y);
             d.chart_soll=lv_chart_add_series(c,lv_color_hex(0xE8ECF1),LV_CHART_AXIS_PRIMARY_Y);
             d.chart_abgas=lv_chart_add_series(c,lv_color_hex(0xF59E0B),LV_CHART_AXIS_SECONDARY_Y);
@@ -657,9 +663,12 @@ lvgl:
             auto pt=[](int16_t v)->int32_t{return v==INT16_MIN?LV_CHART_POINT_NONE:(int32_t)v;};
             for(int i=0;i<d.hist_count;i++){int k=(d.hist_pos-d.hist_count+i+d.HIST_N)%d.HIST_N;
               lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_raum,pt(d.hist_raum[k]));lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_soll,pt(d.hist_soll[k]));
-              lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_abgas,d.hist_abgas[k]==INT16_MIN?LV_CHART_POINT_NONE:d.hist_abgas[k]/10);lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_leistung,pt(d.hist_leistung[k]));}}
+              lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_abgas,d.hist_abgas[k]==INT16_MIN?LV_CHART_POINT_NONE:d.hist_abgas[k]/10);lv_chart_set_next_value(c,(lv_chart_series_t*)d.chart_leistung,pt(d.hist_leistung[k]));}
+            lv_obj_move_foreground(id(lbl_verlauf_leer));}
+            if(d.hist_count>=2)lv_obj_add_flag(id(lbl_verlauf_leer),LV_OBJ_FLAG_HIDDEN);
       widgets:
         - {label: {x: 32, y: 26, text: Verlauf · 24 Stunden, styles: stil_seitentitel}}
+        - {label: {id: lbl_verlauf_leer, x: 32, y: 180, width: 736, text_align: CENTER, text: "Daten werden gesammelt – alle 5 min ein Punkt. Nach einem Neustart beginnt der Verlauf neu.", text_font: inter_20, text_color: "${color_secondary}"}}
         - {obj: {x: 40, y: 350, width: 8, height: 8, radius: 4, bg_color: 0x38BDF8, bg_opa: COVER, border_width: 0}}
         - {label: {x: 56, y: 343, text: Raum, text_font: inter_14, text_color: "${color_secondary}"}}
         - {obj: {x: 140, y: 350, width: 8, height: 8, radius: 4, bg_color: "${color_text}", bg_opa: COVER, border_width: 0}}
