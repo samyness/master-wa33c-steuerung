@@ -18,7 +18,6 @@ substitutions:
 esphome:
   name: ofen-display
   friendly_name: Ofen-Display
-  includes: [components/ofen_link/ofen_display.h]
   build_flags: ["-DLV_USE_CHART=1"]
   on_boot:
     priority: -100
@@ -29,6 +28,7 @@ esphome:
           d.programm.absenkung=id(absenkung).state;
           esphome::text::Text *t[7]={id(prog_mo),id(prog_di),id(prog_mi),id(prog_do),id(prog_fr),id(prog_sa),id(prog_so)};
           for(int i=0;i<7;i++) d.set_tag(i,t[i]->state);
+          esphome::ofen_link::thema_setzen(id(helles_design).state);
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -261,6 +261,17 @@ switch:
     restore_mode: ALWAYS_ON
     internal: true  # nur über "Display aus" bzw. Berühren schalten, sonst weckt Berühren nicht
   - platform: template
+    id: helles_design
+    name: Helles Design
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    web_server: {sorting_group_id: web_einstellung, sorting_weight: 39}
+    on_state:
+      - lambda: |-
+          esphome::ofen_link::thema_setzen(x);
+          auto &d=esphome::ofen_link::display_runtime;
+          if(d.chart)lv_chart_set_series_color((lv_obj_t*)d.chart,(lv_chart_series_t*)d.chart_soll,lv_color_hex(esphome::ofen_link::farbe(0xE8ECF1)));
+  - platform: template
     id: auto_aus_an
     name: Display automatisch aus
     optimistic: true
@@ -432,16 +443,16 @@ interval:
           uint32_t status_farbe=frisch?farbe[bus.status.state%7]:0xEF4444;
           bool start_ok=d.start_erlaubt(bus.status,frisch);
           static uint32_t letzter_stil=0xFFFFFFFF;
-          uint32_t stil=status_farbe^((uint32_t)frisch<<24)^((uint32_t)(bus.status.kette&3)<<25)^((uint32_t)(bus.status.luefter!=0)<<27)^((uint32_t)start_ok<<28);
+          uint32_t stil=status_farbe^((uint32_t)frisch<<24)^((uint32_t)(bus.status.kette&3)<<25)^((uint32_t)(bus.status.luefter!=0)<<27)^((uint32_t)start_ok<<28)^((uint32_t)esphome::ofen_link::thema_hell<<29);
           if(stil!=letzter_stil){letzter_stil=stil;
           lv_obj_set_style_bg_color(id(zustand_punkt),lv_color_hex(status_farbe),0);
-          lv_obj_set_style_bg_color(id(zustand_karte),lv_color_hex(frisch?0x141A22:0x7F1D1D),0);
-          lv_obj_set_style_border_color(id(zustand_karte),lv_color_hex(frisch?0x222B36:0xEF4444),0);
+          lv_obj_set_style_bg_color(id(zustand_karte),lv_color_hex(frisch?esphome::ofen_link::farbe(0x141A22):(esphome::ofen_link::thema_hell?0xFEE2E2:0x7F1D1D)),0);
+          lv_obj_set_style_border_color(id(zustand_karte),lv_color_hex(frisch?esphome::ofen_link::farbe(0x222B36):0xEF4444),0);
           lv_obj_set_style_bg_color(id(kette_punkt),lv_color_hex(frisch&&(bus.status.kette&3)==0?0x22C55E:0xEF4444),0);
           lv_obj_set_style_bg_color(id(luefter_punkt),lv_color_hex(frisch&&bus.status.luefter?0x22C55E:0x6B7280),0);
-          lv_obj_set_style_bg_color(id(btn_start),lv_color_hex(start_ok?0x22C55E:0x141A22),0);
+          lv_obj_set_style_bg_color(id(btn_start),lv_color_hex(start_ok?0x22C55E:esphome::ofen_link::farbe(0x141A22)),0);
           lv_obj_set_style_border_width(id(btn_start),start_ok?0:1,0);
-          lv_obj_set_style_text_color(id(btn_start),lv_color_hex(start_ok?0x0B0F14:0xE8ECF1),0);}
+          lv_obj_set_style_text_color(id(btn_start),lv_color_hex(esphome::ofen_link::farbe(start_ok?0x0B0F14:0xE8ECF1)),0);}
           lv_bar_set_value(id(leistung_bar),frisch&&bus.status.kw>0?lroundf(bus.status.kw*10):170,LV_ANIM_OFF);
           snprintf(b,sizeof(b),"%.1f h Reinigung",id(betriebsstunden));komma(b);set_text(id(lbl_reinigung),b);
           {auto n=id(netzzeit).now();std::string f=d.programm_an&&n.is_valid()?d.naechstes_fenster((n.day_of_week+5)%7,n.hour*60+n.minute):"";set_text(id(lbl_fenster),f.empty()?"Zeitprogramm aus":f.c_str());}
@@ -558,7 +569,7 @@ lvgl:
           bg_color: "${color_alarm}"
           border_width: 0
           shadow_width: 0
-          widgets: [{label: {align: CENTER, text: STOPP, text_font: inter_20}}]
+          widgets: [{label: {align: CENTER, text: STOPP, text_font: inter_20, text_color: 0xFFFFFF}}]
           on_click: [{button.press: stopp}]
   on_idle:
     - timeout: !lambda |-
@@ -705,7 +716,7 @@ lvgl:
     - id: alarm_seite
       bg_color: 0x7F1D1D
       widgets:
-        - {label: {x: 32, y: 26, text: ALARM, text_font: inter_28}}
+        - {label: {x: 32, y: 26, text: ALARM, text_font: inter_28, text_color: 0xFFFFFF}}
         - obj:
             x: 32
             y: 82
@@ -719,16 +730,16 @@ lvgl:
             shadow_width: 0
             widgets:
               - {label: {x: 24, y: 22, text: URSACHE, text_font: inter_14, text_letter_space: 2, text_color: 0xFECACA}}
-              - {label: {id: lbl_alarm, x: 24, y: 54, width: 688, text: Alarm, text_font: inter_28}}
+              - {label: {id: lbl_alarm, x: 24, y: 54, width: 688, text: Alarm, text_font: inter_28, text_color: 0xFFFFFF}}
               - {obj: {x: 24, y: 108, width: 688, height: 1, bg_color: 0xB91C1C, bg_opa: COVER, border_width: 0}}
               - {label: {x: 24, y: 128, text: NÄCHSTE SCHRITTE, text_font: inter_14, text_letter_space: 2, text_color: 0xFECACA}}
-              - {label: {id: lbl_alarm_hinweis, x: 24, y: 160, width: 688, text: Ursache prüfen, text_font: inter_20}}
+              - {label: {id: lbl_alarm_hinweis, x: 24, y: 160, width: 688, text: Ursache prüfen, text_font: inter_20, text_color: 0xFFFFFF}}
               - button:
                   x: 24
                   y: 216
                   width: 276
                   height: 58
-                  bg_color: "${color_text}"
+                  bg_color: 0xFFFFFF
                   text_color: 0x7F1D1D
                   border_width: 0
                   shadow_width: 0
@@ -739,12 +750,12 @@ lvgl:
         - lambda: |-
             auto &d=esphome::ofen_link::display_runtime;
             if(!d.chart){auto *c=lv_chart_create(id(verlauf_seite)->obj);d.chart=c;lv_obj_set_pos(c,32,76);lv_obj_set_size(c,736,252);
-            lv_obj_set_style_bg_color(c,lv_color_hex(0x141A22),0);lv_obj_set_style_border_color(c,lv_color_hex(0x222B36),0);
-            lv_obj_set_style_border_width(c,1,0);lv_obj_set_style_radius(c,16,0);lv_obj_set_style_line_color(c,lv_color_hex(0x1C2430),LV_PART_MAIN);
+            lv_obj_set_style_bg_color(c,lv_color_hex(esphome::ofen_link::farbe(0x141A22)),0);lv_obj_set_style_border_color(c,lv_color_hex(esphome::ofen_link::farbe(0x222B36)),0);
+            lv_obj_set_style_border_width(c,1,0);lv_obj_set_style_radius(c,16,0);lv_obj_set_style_line_color(c,lv_color_hex(esphome::ofen_link::farbe(0x1C2430)),LV_PART_MAIN);
             lv_chart_set_div_line_count(c,5,6);lv_chart_set_type(c,LV_CHART_TYPE_LINE);lv_chart_set_point_count(c,288);lv_chart_set_range(c,LV_CHART_AXIS_PRIMARY_Y,0,350);lv_chart_set_range(c,LV_CHART_AXIS_SECONDARY_Y,0,600);
             lv_obj_set_style_size(c,4,4,LV_PART_INDICATOR);
             d.chart_raum=lv_chart_add_series(c,lv_color_hex(0x38BDF8),LV_CHART_AXIS_PRIMARY_Y);
-            d.chart_soll=lv_chart_add_series(c,lv_color_hex(0xE8ECF1),LV_CHART_AXIS_PRIMARY_Y);
+            d.chart_soll=lv_chart_add_series(c,lv_color_hex(esphome::ofen_link::farbe(0xE8ECF1)),LV_CHART_AXIS_PRIMARY_Y);
             d.chart_abgas=lv_chart_add_series(c,lv_color_hex(0xF59E0B),LV_CHART_AXIS_SECONDARY_Y);
             d.chart_leistung=lv_chart_add_series(c,lv_color_hex(0x22C55E),LV_CHART_AXIS_PRIMARY_Y);
             auto pt=[](int16_t v)->int32_t{return v==INT16_MIN?LV_CHART_POINT_NONE:(int32_t)v;};
@@ -857,40 +868,43 @@ lvgl:
               - button: {x: 500, y: 180, width: 216, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Reinigung Reset}}], on_click: [{button.press: reinigung_reset}]}
         - button: {x: 32, y: 400, width: 144, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Zurück}}], on_click: [{lvgl.page.show: uebersicht_seite}]}
     - id: display_seite
-      on_load: [{lambda: 'auto setz=[](lv_obj_t *o,bool an){if(an)lv_obj_add_state(o,LV_STATE_CHECKED);else lv_obj_remove_state(o,LV_STATE_CHECKED);};setz(id(sw_auto_aus),id(auto_aus_an).state);setz(id(sw_nacht),id(nachtmodus_an).state);setz(id(sw_anlauf),id(wach_bei_anlauf).state);char b[16];snprintf(b,sizeof(b),"%.0f min",id(screensaver_min).state);lv_label_set_text(id(lbl_aus_nach),b);snprintf(b,sizeof(b),"%.0f",id(nacht_von_h).state);lv_label_set_text(id(lbl_nacht_von),b);snprintf(b,sizeof(b),"%.0f",id(nacht_bis_h).state);lv_label_set_text(id(lbl_nacht_bis),b);'}]
+      on_load: [{lambda: 'auto setz=[](lv_obj_t *o,bool an){if(an)lv_obj_add_state(o,LV_STATE_CHECKED);else lv_obj_remove_state(o,LV_STATE_CHECKED);};setz(id(sw_auto_aus),id(auto_aus_an).state);setz(id(sw_nacht),id(nachtmodus_an).state);setz(id(sw_anlauf),id(wach_bei_anlauf).state);setz(id(sw_hell),id(helles_design).state);char b[16];snprintf(b,sizeof(b),"%.0f min",id(screensaver_min).state);lv_label_set_text(id(lbl_aus_nach),b);snprintf(b,sizeof(b),"%.0f",id(nacht_von_h).state);lv_label_set_text(id(lbl_nacht_von),b);snprintf(b,sizeof(b),"%.0f",id(nacht_bis_h).state);lv_label_set_text(id(lbl_nacht_bis),b);'}]
       widgets:
         - {label: {x: 32, y: 28, text: Display, styles: stil_seitentitel}}
         - obj:
             x: 32
-            y: 82
+            y: 72
             width: 736
-            height: 302
+            height: 320
             styles: stil_karte
             widgets:
-              - {label: {x: 20, y: 30, text: "Automatisch ausschalten", text_font: inter_20}}
-              - switch: {id: sw_auto_aus, x: 636, y: 20, width: 80, height: 44, bg_color: "${color_border}", indicator: {checked: {bg_color: "${color_running}"}}, on_change: [{lambda: 'if(x)id(auto_aus_an).turn_on();else id(auto_aus_an).turn_off();'}]}
-              - {obj: {x: 20, y: 76, width: 696, height: 1, bg_color: "${color_divider}", bg_opa: COVER, border_width: 0}}
-              - {label: {x: 20, y: 102, text: "Aus nach", text_font: inter_20}}
-              - button: {x: 456, y: 86, width: 60, height: 60, radius: 30, styles: stil_ghost, widgets: [{label: {align: CENTER, text: "-", text_font: inter_28}}], on_click: [{number.set: {id: screensaver_min, value: !lambda 'static const int st[7]={1,2,5,10,15,30,60};int v=(int)id(screensaver_min).state,i=0;while(i<6&&st[i]<v)i++;return st[i>0?i-1:0];'}}]}
-              - {label: {id: lbl_aus_nach, x: 516, y: 102, width: 140, text_align: CENTER, text: "10 min", text_font: inter_20}}
-              - button: {x: 656, y: 86, width: 60, height: 60, radius: 30, styles: stil_ghost, widgets: [{label: {align: CENTER, text: "+", text_font: inter_28}}], on_click: [{number.set: {id: screensaver_min, value: !lambda 'static const int st[7]={1,2,5,10,15,30,60};int v=(int)id(screensaver_min).state,i=0;while(i<6&&st[i]<v)i++;if(i<6&&st[i]==v)i++;return st[i>6?6:i];'}}]}
-              - {obj: {x: 20, y: 148, width: 696, height: 1, bg_color: "${color_divider}", bg_opa: COVER, border_width: 0}}
-              - {label: {x: 20, y: 174, text: "Nachts 30 s", text_font: inter_20}}
-              - switch: {id: sw_nacht, x: 150, y: 164, width: 80, height: 44, bg_color: "${color_border}", indicator: {checked: {bg_color: "${color_running}"}}, on_change: [{lambda: 'if(x)id(nachtmodus_an).turn_on();else id(nachtmodus_an).turn_off();'}]}
-              - button: {x: 256, y: 158, width: 60, height: 60, radius: 30, styles: stil_ghost, widgets: [{label: {align: CENTER, text: "-", text_font: inter_28}}], on_click: [{number.set: {id: nacht_von_h, value: !lambda 'return ((int)id(nacht_von_h).state+23)%24;'}}]}
-              - {label: {id: lbl_nacht_von, x: 316, y: 174, width: 60, text_align: CENTER, text: "22", text_font: inter_20}}
-              - button: {x: 376, y: 158, width: 60, height: 60, radius: 30, styles: stil_ghost, widgets: [{label: {align: CENTER, text: "+", text_font: inter_28}}], on_click: [{number.set: {id: nacht_von_h, value: !lambda 'return ((int)id(nacht_von_h).state+1)%24;'}}]}
-              - {label: {x: 444, y: 174, text: "bis", text_font: inter_20, text_color: "${color_secondary}"}}
-              - button: {x: 496, y: 158, width: 60, height: 60, radius: 30, styles: stil_ghost, widgets: [{label: {align: CENTER, text: "-", text_font: inter_28}}], on_click: [{number.set: {id: nacht_bis_h, value: !lambda 'return ((int)id(nacht_bis_h).state+23)%24;'}}]}
-              - {label: {id: lbl_nacht_bis, x: 556, y: 174, width: 60, text_align: CENTER, text: "6", text_font: inter_20}}
-              - button: {x: 616, y: 158, width: 60, height: 60, radius: 30, styles: stil_ghost, widgets: [{label: {align: CENTER, text: "+", text_font: inter_28}}], on_click: [{number.set: {id: nacht_bis_h, value: !lambda 'return ((int)id(nacht_bis_h).state+1)%24;'}}]}
-              - {label: {x: 676, y: 178, text: "Uhr", text_font: inter_14, text_color: "${color_secondary}"}}
-              - {obj: {x: 20, y: 220, width: 696, height: 1, bg_color: "${color_divider}", bg_opa: COVER, border_width: 0}}
-              - {label: {x: 20, y: 246, text: "An lassen beim Anzünden/Anlauf", text_font: inter_20}}
-              - switch: {id: sw_anlauf, x: 636, y: 236, width: 80, height: 44, bg_color: "${color_border}", indicator: {checked: {bg_color: "${color_running}"}}, on_change: [{lambda: 'if(x)id(wach_bei_anlauf).turn_on();else id(wach_bei_anlauf).turn_off();'}]}
-        - button: {x: 32, y: 400, width: 144, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Zurück}}], on_click: [{lvgl.page.show: einstellung_seite}]}
-        - button: {x: 192, y: 400, width: 200, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Jetzt aus}}], on_click: [{button.press: display_aus}]}
-        - {label: {x: 408, y: 412, width: 220, text: "Alarm weckt das Display immer.", text_font: inter_14, text_color: "${color_secondary}"}}
+              - {label: {x: 20, y: 20, text: "Automatisch ausschalten", text_font: inter_20}}
+              - switch: {id: sw_auto_aus, x: 636, y: 10, width: 80, height: 44, bg_color: "${color_border}", indicator: {checked: {bg_color: "${color_running}"}}, on_change: [{lambda: 'if(x)id(auto_aus_an).turn_on();else id(auto_aus_an).turn_off();'}]}
+              - {obj: {x: 20, y: 64, width: 696, height: 1, bg_color: "${color_divider}", bg_opa: COVER, border_width: 0}}
+              - {label: {x: 20, y: 84, text: "Aus nach", text_font: inter_20}}
+              - button: {x: 456, y: 66, width: 60, height: 60, radius: 30, styles: stil_ghost, widgets: [{label: {align: CENTER, text: "-", text_font: inter_28}}], on_click: [{number.set: {id: screensaver_min, value: !lambda 'static const int st[7]={1,2,5,10,15,30,60};int v=(int)id(screensaver_min).state,i=0;while(i<6&&st[i]<v)i++;return st[i>0?i-1:0];'}}]}
+              - {label: {id: lbl_aus_nach, x: 516, y: 84, width: 140, text_align: CENTER, text: "10 min", text_font: inter_20}}
+              - button: {x: 656, y: 66, width: 60, height: 60, radius: 30, styles: stil_ghost, widgets: [{label: {align: CENTER, text: "+", text_font: inter_28}}], on_click: [{number.set: {id: screensaver_min, value: !lambda 'static const int st[7]={1,2,5,10,15,30,60};int v=(int)id(screensaver_min).state,i=0;while(i<6&&st[i]<v)i++;if(i<6&&st[i]==v)i++;return st[i>6?6:i];'}}]}
+              - {obj: {x: 20, y: 128, width: 696, height: 1, bg_color: "${color_divider}", bg_opa: COVER, border_width: 0}}
+              - {label: {x: 20, y: 148, text: "Nachts 30 s", text_font: inter_20}}
+              - switch: {id: sw_nacht, x: 150, y: 138, width: 80, height: 44, bg_color: "${color_border}", indicator: {checked: {bg_color: "${color_running}"}}, on_change: [{lambda: 'if(x)id(nachtmodus_an).turn_on();else id(nachtmodus_an).turn_off();'}]}
+              - button: {x: 256, y: 130, width: 60, height: 60, radius: 30, styles: stil_ghost, widgets: [{label: {align: CENTER, text: "-", text_font: inter_28}}], on_click: [{number.set: {id: nacht_von_h, value: !lambda 'return ((int)id(nacht_von_h).state+23)%24;'}}]}
+              - {label: {id: lbl_nacht_von, x: 316, y: 148, width: 60, text_align: CENTER, text: "22", text_font: inter_20}}
+              - button: {x: 376, y: 130, width: 60, height: 60, radius: 30, styles: stil_ghost, widgets: [{label: {align: CENTER, text: "+", text_font: inter_28}}], on_click: [{number.set: {id: nacht_von_h, value: !lambda 'return ((int)id(nacht_von_h).state+1)%24;'}}]}
+              - {label: {x: 444, y: 148, text: "bis", text_font: inter_20, text_color: "${color_secondary}"}}
+              - button: {x: 496, y: 130, width: 60, height: 60, radius: 30, styles: stil_ghost, widgets: [{label: {align: CENTER, text: "-", text_font: inter_28}}], on_click: [{number.set: {id: nacht_bis_h, value: !lambda 'return ((int)id(nacht_bis_h).state+23)%24;'}}]}
+              - {label: {id: lbl_nacht_bis, x: 556, y: 148, width: 60, text_align: CENTER, text: "6", text_font: inter_20}}
+              - button: {x: 616, y: 130, width: 60, height: 60, radius: 30, styles: stil_ghost, widgets: [{label: {align: CENTER, text: "+", text_font: inter_28}}], on_click: [{number.set: {id: nacht_bis_h, value: !lambda 'return ((int)id(nacht_bis_h).state+1)%24;'}}]}
+              - {label: {x: 676, y: 152, text: "Uhr", text_font: inter_14, text_color: "${color_secondary}"}}
+              - {obj: {x: 20, y: 192, width: 696, height: 1, bg_color: "${color_divider}", bg_opa: COVER, border_width: 0}}
+              - {label: {x: 20, y: 212, text: "An lassen beim Anzünden/Anlauf", text_font: inter_20}}
+              - switch: {id: sw_anlauf, x: 636, y: 202, width: 80, height: 44, bg_color: "${color_border}", indicator: {checked: {bg_color: "${color_running}"}}, on_change: [{lambda: 'if(x)id(wach_bei_anlauf).turn_on();else id(wach_bei_anlauf).turn_off();'}]}
+              - {obj: {x: 20, y: 256, width: 696, height: 1, bg_color: "${color_divider}", bg_opa: COVER, border_width: 0}}
+              - {label: {x: 20, y: 276, text: "Helles Design", text_font: inter_20}}
+              - switch: {id: sw_hell, x: 636, y: 266, width: 80, height: 44, bg_color: "${color_border}", indicator: {checked: {bg_color: "${color_running}"}}, on_change: [{lambda: 'if(x)id(helles_design).turn_on();else id(helles_design).turn_off();'}]}
+        - button: {x: 32, y: 404, width: 144, height: 60, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Zurück}}], on_click: [{lvgl.page.show: einstellung_seite}]}
+        - button: {x: 192, y: 404, width: 200, height: 60, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Jetzt aus}}], on_click: [{button.press: display_aus}]}
+        - {label: {x: 408, y: 414, width: 220, text: "Alarm weckt das Display immer.", text_font: inter_14, text_color: "${color_secondary}"}}
     - id: kal_seite
       widgets:
         - {label: {x: 32, y: 28, text: Kalibrierassistent, styles: stil_seitentitel}}

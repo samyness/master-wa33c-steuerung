@@ -132,6 +132,7 @@ kommen bei jedem Alarm, wenn der Raumfühler fehlt und wenn eine Heizzeit beginn
 | Aus nach | 1, 2, 5, 10, 15, 30 oder 60 min (Standard 10 min) |
 | Nachts 30 s, von … bis … Uhr | In diesem Zeitraum schon nach 30 s aus (Standard aus, 22–6 Uhr) |
 | An lassen beim Anzünden/Anlauf | Während du den Ofen hochfährst, bleibt das Display an (Standard an) |
+| Helles Design | Heller Hintergrund mit dunkler Schrift statt dunklem Design (Standard aus). Die Alarmseite bleibt rot. |
 | Jetzt aus | Sofort dunkel |
 
 Eine Berührung weckt das Display. Diese Weck-Berührung löst keinen Knopf aus. Ein Alarm schaltet das Display

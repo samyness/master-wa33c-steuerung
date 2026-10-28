@@ -8,6 +8,7 @@
 
 #include "esphome/components/ofen_logic/controller.h"
 #include "esphome/components/ofen_logic/regler.h"
+#include "esphome/components/ofen_link/ofen_thema.h"
 
 namespace esphome::ofen_link {
 
