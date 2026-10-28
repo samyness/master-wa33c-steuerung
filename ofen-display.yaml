@@ -70,6 +70,8 @@ ch422g:
 display:
   - platform: mipi_rgb
     model: ESP32-S3-TOUCH-LCD-7-800X480
+    # Standard 16 MHz ist für PSRAM + WLAN grenzwertig (Flackern); 14 MHz ≈ 33 Bilder/s
+    pclk_frequency: 14MHz
     id: display_panel
     update_interval: never
     auto_clear_enabled: false
@@ -344,36 +346,42 @@ interval:
           while(!bus.rx.empty()){auto a=bus.rx.front();bus.rx.pop_front();if(a.type=='A'&&a.name=="ERR"){long r=strtol(a.arg.c_str(),nullptr,10);d.meldung=std::string("Befehl abgelehnt: ")+ofen::reason_text((ofen::Reason)r);}}
           if(millis()-d.letzter_raum_ms>600000UL)d.raum_warnung=true;
           if(d.kal_abbrechen(bus.status,frisch,id(raum_temp).state,millis())){bus.send_cmd('C',"STOP");d.kal=esphome::ofen_link::DisplayRuntime::KalSchritt::AUS;d.meldung="Kalibrierung abgebrochen";}
-          if(d.kal==esphome::ofen_link::DisplayRuntime::KalSchritt::PUMPE&&!d.kal_wartet_ml&&millis()-d.stufe_start_ms>=180000UL){bus.send_cmd('C',"STOP");d.kal_wartet_ml=true;d.meldung="Menge eingeben und WERT SPEICHERN drücken";}
-          char b[180]; snprintf(b,sizeof(b),frisch?"%s%s":"VERBINDUNGSFEHLER",frisch?ofen::state_name((ofen::State)bus.status.state):"",(frisch&&bus.status.warn)?" – WARNUNG":"");lv_label_set_text(id(lbl_zustand),b);
+          if(d.kal==esphome::ofen_link::DisplayRuntime::KalSchritt::PUMPE&&!d.kal_wartet_ml&&millis()-d.stufe_start_ms>=180000UL){bus.send_cmd('C',"STOP");d.kal_wartet_ml=true;d.meldung="Stufe fertig – MENGE EINGEBEN drücken";}
+          // Nur bei Änderung neu setzen: jedes Setzen lässt LVGL neu zeichnen und belastet den PSRAM (Flackern)
+          auto set_text=[](lv_obj_t *o,const char *t){if(strcmp(lv_label_get_text(o),t)!=0)lv_label_set_text(o,t);};
+          char b[180]; snprintf(b,sizeof(b),frisch?"%s%s":"VERBINDUNGSFEHLER",frisch?ofen::state_name((ofen::State)bus.status.state):"",(frisch&&bus.status.warn)?" – WARNUNG":"");
+          if(frisch&&bus.status.anlauf_rest_s>0)snprintf(b,sizeof(b),"%s – noch %ld min",ofen::state_name((ofen::State)bus.status.state),(bus.status.anlauf_rest_s+59)/60);
+          set_text(id(lbl_zustand),b);
           auto komma=[](char *s){for(;*s;s++)if(*s=='.')*s=',';};  // deutsches Dezimalkomma
-          if(id(raum_temp).has_state())snprintf(b,sizeof(b),"%.1f°",id(raum_temp).state);else snprintf(b,sizeof(b),"--,-°");komma(b);lv_label_set_text(id(lbl_raum),b);
-          snprintf(b,sizeof(b),"%.1f",d.soll_c);komma(b);lv_label_set_text(id(lbl_soll),b);
-          snprintf(b,sizeof(b),"%.1f",bus.status.abgas_c);komma(b);lv_label_set_text(id(lbl_ofenwerte),b);
-          snprintf(b,sizeof(b),"%.1f",bus.status.kw);komma(b);lv_label_set_text(id(lbl_leistung),b);
+          if(id(raum_temp).has_state())snprintf(b,sizeof(b),"%.1f°",id(raum_temp).state);else snprintf(b,sizeof(b),"--,-°");komma(b);set_text(id(lbl_raum),b);
+          snprintf(b,sizeof(b),"%.1f",d.soll_c);komma(b);set_text(id(lbl_soll),b);
+          snprintf(b,sizeof(b),"%.1f",bus.status.abgas_c);komma(b);set_text(id(lbl_ofenwerte),b);
+          snprintf(b,sizeof(b),"%.1f",bus.status.kw);komma(b);set_text(id(lbl_leistung),b);
           static const char *const kette[4]={"STB und Überlauf zu","Überlauf offen","STB offen / F3","Kettenfehler"};
-          snprintf(b,sizeof(b),"%s",kette[bus.status.kette&3]);lv_label_set_text(id(lbl_details),b);
-          lv_label_set_text(id(lbl_luefter),bus.status.luefter?"Lüfter an":"Lüfter aus");
-          if(frisch&&bus.status.anlauf_rest_s>0){snprintf(b,sizeof(b),"%s – noch %ld min",ofen::state_name((ofen::State)bus.status.state),(bus.status.anlauf_rest_s+59)/60);lv_label_set_text(id(lbl_zustand),b);}
+          snprintf(b,sizeof(b),"%s",kette[bus.status.kette&3]);set_text(id(lbl_details),b);
+          set_text(id(lbl_luefter),bus.status.luefter?"Lüfter an":"Lüfter aus");
           // Zustandsfarbe: Stop, Anzünden/Anlauf, Betrieb, Auslöschen, Alarm, Kalibrierung
           static const uint32_t farbe[7]={0x6B7280,0xF59E0B,0xF59E0B,0x22C55E,0x3B82F6,0xEF4444,0xA855F7};
           uint32_t status_farbe=frisch?farbe[bus.status.state%7]:0xEF4444;
+          bool start_ok=d.start_erlaubt(bus.status,frisch);
+          static uint32_t letzter_stil=0xFFFFFFFF;
+          uint32_t stil=status_farbe^((uint32_t)frisch<<24)^((uint32_t)(bus.status.kette&3)<<25)^((uint32_t)(bus.status.luefter!=0)<<27)^((uint32_t)start_ok<<28);
+          if(stil!=letzter_stil){letzter_stil=stil;
           lv_obj_set_style_bg_color(id(zustand_punkt),lv_color_hex(status_farbe),0);
           lv_obj_set_style_bg_color(id(zustand_karte),lv_color_hex(frisch?0x141A22:0x7F1D1D),0);
           lv_obj_set_style_border_color(id(zustand_karte),lv_color_hex(frisch?0x222B36:0xEF4444),0);
           lv_obj_set_style_bg_color(id(kette_punkt),lv_color_hex(frisch&&(bus.status.kette&3)==0?0x22C55E:0xEF4444),0);
           lv_obj_set_style_bg_color(id(luefter_punkt),lv_color_hex(frisch&&bus.status.luefter?0x22C55E:0x6B7280),0);
-          bool start_ok=d.start_erlaubt(bus.status,frisch);
           lv_obj_set_style_bg_color(id(btn_start),lv_color_hex(start_ok?0x22C55E:0x141A22),0);
           lv_obj_set_style_border_width(id(btn_start),start_ok?0:1,0);
-          lv_obj_set_style_text_color(id(btn_start),lv_color_hex(start_ok?0x0B0F14:0xE8ECF1),0);
+          lv_obj_set_style_text_color(id(btn_start),lv_color_hex(start_ok?0x0B0F14:0xE8ECF1),0);}
           lv_bar_set_value(id(leistung_bar),frisch&&bus.status.kw>0?lroundf(bus.status.kw*10):170,LV_ANIM_OFF);
-          snprintf(b,sizeof(b),"%.1f h Reinigung",id(betriebsstunden));komma(b);lv_label_set_text(id(lbl_reinigung),b);
-          {auto n=id(netzzeit).now();std::string f=d.programm_an&&n.is_valid()?d.naechstes_fenster((n.day_of_week+5)%7,n.hour*60+n.minute):"";lv_label_set_text(id(lbl_fenster),f.empty()?"Zeitprogramm aus":f.c_str());}
+          snprintf(b,sizeof(b),"%.1f h Reinigung",id(betriebsstunden));komma(b);set_text(id(lbl_reinigung),b);
+          {auto n=id(netzzeit).now();std::string f=d.programm_an&&n.is_valid()?d.naechstes_fenster((n.day_of_week+5)%7,n.hour*60+n.minute):"";set_text(id(lbl_fenster),f.empty()?"Zeitprogramm aus":f.c_str());}
           {std::string empf=id(raum_temp).has_state()?std::to_string((millis()-d.letzter_raum_ms)/1000)+" s seit Empfang":"noch nichts empfangen";
-          snprintf(b,sizeof(b),"Funkfühler: %s\nWLAN: %s (%.0f dBm)",empf.c_str(),wifi::global_wifi_component->is_connected()?"verbunden":"getrennt",id(wlan_rssi).state);lv_label_set_text(id(lbl_info),b);}
-          lv_label_set_text(id(lbl_warnung),d.raum_warnung?"WARNUNG: Raumfühler fehlt seit mehr als 10 min":d.meldung.c_str());
-          if(frisch&&bus.status.state==(long)ofen::State::ALARM){lv_label_set_text(id(lbl_alarm),ofen::alarm_text((ofen::Alarm)bus.status.alarm));lv_label_set_text(id(lbl_alarm_hinweis),ofen::alarm_hint((ofen::Alarm)bus.status.alarm));}
+          snprintf(b,sizeof(b),"Funkfühler: %s\nWLAN: %s (%.0f dBm)",empf.c_str(),wifi::global_wifi_component->is_connected()?"verbunden":"getrennt",id(wlan_rssi).state);set_text(id(lbl_info),b);}
+          set_text(id(lbl_warnung),d.raum_warnung?"WARNUNG: Raumfühler fehlt seit mehr als 10 min":d.meldung.c_str());
+          if(frisch&&bus.status.state==(long)ofen::State::ALARM){set_text(id(lbl_alarm),ofen::alarm_text((ofen::Alarm)bus.status.alarm));set_text(id(lbl_alarm_hinweis),ofen::alarm_hint((ofen::Alarm)bus.status.alarm));}
       - if:
           condition: {lambda: 'return id(ofen_bus)->status_fresh(5000)&&id(ofen_bus)->status.state==(long)ofen::State::ALARM&&!id(alarm_seite)->is_showing();'}
           then: [lvgl.resume:, {lvgl.page.show: alarm_seite}]
