@@ -380,6 +380,7 @@ interval:
           {auto n=id(netzzeit).now();std::string f=d.programm_an&&n.is_valid()?d.naechstes_fenster((n.day_of_week+5)%7,n.hour*60+n.minute):"";set_text(id(lbl_fenster),f.empty()?"Zeitprogramm aus":f.c_str());}
           {std::string empf=id(raum_temp).has_state()?std::to_string((millis()-d.letzter_raum_ms)/1000)+" s seit Empfang":"noch nichts empfangen";
           snprintf(b,sizeof(b),"Funkfühler: %s\nWLAN: %s (%.0f dBm)",empf.c_str(),wifi::global_wifi_component->is_connected()?"verbunden":"getrennt",id(wlan_rssi).state);set_text(id(lbl_info),b);}
+          set_text(id(lbl_kal_status),d.kal_status(millis()).c_str());
           set_text(id(lbl_warnung),d.raum_warnung?"WARNUNG: Raumfühler fehlt seit mehr als 10 min":d.meldung.c_str());
           if(frisch&&bus.status.state==(long)ofen::State::ALARM){set_text(id(lbl_alarm),ofen::alarm_text((ofen::Alarm)bus.status.alarm));set_text(id(lbl_alarm_hinweis),ofen::alarm_hint((ofen::Alarm)bus.status.alarm));}
       - if:
@@ -781,9 +782,9 @@ lvgl:
         - {label: {x: 32, y: 28, text: Kalibrierassistent, styles: stil_seitentitel}}
         - {label: {x: 32, y: 72, width: 736, text: "Pumpe: fünf Stufen à 3 min, danach Menge eingeben. STOPP bricht jederzeit ab.", text_font: inter_14, text_color: "${color_secondary}"}}
         - button: {x: 32, y: 112, width: 226, height: 72, styles: stil_ghost, widgets: [{label: {align: CENTER, text: PUMPE MESSEN}}], on_click: [{lvgl.page.show: kal_bestaetigung_seite}]}
-        - button: {x: 274, y: 112, width: 226, height: 72, styles: stil_ghost, widgets: [{label: {align: CENTER, text: FLAMME LERNEN}}], on_click: [{lambda: 'auto &d=esphome::ofen_link::display_runtime;if(id(ofen_bus).status.state==(long)ofen::State::BETRIEB){d.kal=esphome::ofen_link::DisplayRuntime::KalSchritt::FLAMME;d.kal_start_ms=millis();d.flamme_summe=0;d.flamme_n=0;}'}]}
-        - button: {x: 516, y: 112, width: 252, height: 72, styles: stil_ghost, widgets: [{label: {align: CENTER, text: SPRUNGTEST}}], on_click: [{lambda: 'auto &d=esphome::ofen_link::display_runtime;if(id(ofen_bus).status.state==(long)ofen::State::BETRIEB&&millis()-d.betrieb_seit_ms>=3600000UL){d.kal=esphome::ofen_link::DisplayRuntime::KalSchritt::SPRUNG;d.kal_start_ms=millis();d.sprung_n=0;}else d.meldung="Sprungtest erst nach 60 min Betrieb";'}]}
-        - {label: {x: 32, y: 216, text: GEMESSENE ÖLMENGE · ML, styles: stil_kacheltitel}}
+        - button: {x: 274, y: 112, width: 226, height: 72, styles: stil_ghost, widgets: [{label: {align: CENTER, text: FLAMME LERNEN}}], on_click: [{lambda: 'auto &d=esphome::ofen_link::display_runtime;std::string g=d.kal_sperre(id(ofen_bus)->status,id(ofen_bus)->status_fresh(5000),false,millis());if(!g.empty()){d.meldung="Flamme lernen: "+g;return;}d.kal=esphome::ofen_link::DisplayRuntime::KalSchritt::FLAMME;d.kal_start_ms=millis();d.flamme_summe=0;d.flamme_n=0;d.meldung="";'}]}
+        - button: {x: 516, y: 112, width: 252, height: 72, styles: stil_ghost, widgets: [{label: {align: CENTER, text: SPRUNGTEST}}], on_click: [{lambda: 'auto &d=esphome::ofen_link::display_runtime;std::string g=d.kal_sperre(id(ofen_bus)->status,id(ofen_bus)->status_fresh(5000),true,millis());if(!g.empty()){d.meldung="Sprungtest: "+g;return;}d.kal=esphome::ofen_link::DisplayRuntime::KalSchritt::SPRUNG;d.kal_start_ms=millis();d.sprung_n=0;d.meldung="";'}]}
+        - {label: {id: lbl_kal_status, x: 32, y: 200, width: 736, text: "", text_font: inter_20, text_color: "${color_ignition}"}}
         - button: {x: 32, y: 246, width: 416, height: 70, styles: stil_ghost, widgets: [{label: {align: CENTER, text: MENGE EINGEBEN}}], on_click: [{lambda: 'lv_textarea_set_text(id(ml_feld),"");'}, {lvgl.page.show: kal_ml_seite}]}
         - button:
             x: 464

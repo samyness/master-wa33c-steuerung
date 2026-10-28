@@ -92,6 +92,60 @@ struct DisplayRuntime {
     auto r = ofen::pumpe_kalibrieren(kal_pwm.data(), kal_ml.data(), 5, 3.f, dichte);
     neu_min_pwm = r.ok ? r.pwm_17 : NAN; neu_max_pwm = r.ok ? r.pwm_33 : NAN;
   }
+  // Statuszeile der Kalibrierseite: laufender Schritt mit Fortschritt, sonst Ergebnis oder letzte Meldung.
+  std::string kal_status(uint32_t now) const {
+    char b[160];
+    const unsigned min = (now - kal_start_ms) / 60000;
+    switch (kal) {
+      case KalSchritt::PUMPE: {
+        if (kal_wartet_ml) {
+          snprintf(b, sizeof(b), "Pumpe Stufe %d/5 fertig – MENGE EINGEBEN", kal_stufe + 1);
+        } else {
+          unsigned rest = (180000UL - std::min<uint32_t>(180000UL, now - stufe_start_ms)) / 1000;
+          snprintf(b, sizeof(b), "Pumpe Stufe %d/5 (%.0f %%): noch %u:%02u min", kal_stufe + 1, kal_pwm[kal_stufe] * 100,
+                   rest / 60, rest % 60);
+        }
+        return b;
+      }
+      case KalSchritt::FLAMME:
+        snprintf(b, sizeof(b), "Flamme lernen läuft: %u von 20 min, Leistung auf Minimum", min);
+        return b;
+      case KalSchritt::SPRUNG:
+        snprintf(b, sizeof(b), "Sprungtest läuft: %d von 90 min, Leistung 100 %%", sprung_n > 0 ? sprung_n - 1 : 0);
+        return b;
+      case KalSchritt::AUS:
+        break;
+    }
+    if (!std::isnan(neu_min_pwm)) {
+      snprintf(b, sizeof(b), "Ergebnis Pumpe: 17 kW = %.0f %%, 33 kW = %.0f %% – ÜBERNEHMEN", neu_min_pwm * 100,
+               neu_max_pwm * 100);
+      return b;
+    }
+    if (!std::isnan(neu_flamme)) {
+      snprintf(b, sizeof(b), "Vorschlag Flamme aus: %.0f °C – ÜBERNEHMEN", neu_flamme);
+      return b;
+    }
+    if (sprung_ergebnis.ok) {
+      snprintf(b, sizeof(b), "Regler: Kp = %.1f %%/K, Ti = %.0f min – ÜBERNEHMEN", sprung_ergebnis.kp, sprung_ergebnis.ti_min);
+      return b;
+    }
+    return meldung.empty() ? "Bereit. Flamme lernen und Sprungtest brauchen Regelbetrieb." : meldung;
+  }
+
+  // Grund, warum Flamme lernen / Sprungtest jetzt nicht starten darf ("" = erlaubt).
+  std::string kal_sperre(const ofen::StatusMsg &s, bool frisch, bool sprung, uint32_t now) const {
+    if (kal != KalSchritt::AUS) return "Es läuft bereits ein Kalibrierschritt";
+    if (!frisch) return "Keine Verbindung zum Ofen-Controller";
+    if (s.state != (long) ofen::State::BETRIEB) return "Nur im Regelbetrieb (BETRIEB) möglich";
+    if (sprung && now - betrieb_seit_ms < 3600000UL) {
+      char b[80];
+      snprintf(b, sizeof(b), "Sprungtest erst nach 60 min Betrieb (noch %lu min)",
+               (unsigned long) ((3600000UL - (now - betrieb_seit_ms)) / 60000 + 1));
+      return b;
+    }
+    return "";
+  }
+
   bool kal_abbrechen(const ofen::StatusMsg &s, bool frisch, float raum, uint32_t now) const {
     return kal != KalSchritt::AUS && (!frisch || s.state == (long) ofen::State::ALARM ||
       std::isnan(raum) || raum > 26.f || now - kal_start_ms > 3UL * 60UL * 60UL * 1000UL);
