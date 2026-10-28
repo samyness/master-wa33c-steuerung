@@ -89,7 +89,7 @@ font:
   - {file: {type: gfonts, family: Inter, weight: 300}, id: inter_40, size: 40, bpp: 4, glyphsets: [GF_Latin_Kernel], glyphs: "äöüÄÖÜß°–…×àé·"}
   - {file: {type: gfonts, family: Inter, weight: 500}, id: inter_20, size: 20, bpp: 4, glyphsets: [GF_Latin_Kernel], glyphs: "äöüÄÖÜß°–…×àé·"}
   - {file: {type: gfonts, family: Inter, weight: 600}, id: inter_14, size: 14, bpp: 4, glyphsets: [GF_Latin_Kernel], glyphs: "äöüÄÖÜß°–…×àé·"}
-  - {file: {type: gfonts, family: Inter, weight: 600}, id: inter_28, size: 28, bpp: 4, glyphsets: [GF_Latin_Kernel], glyphs: "äöüÄÖÜß°–…×àé·"}
+  - {file: {type: gfonts, family: Inter, weight: 600}, id: inter_28, size: 28, bpp: 4, glyphsets: [GF_Latin_Kernel], glyphs: "äöüÄÖÜß°–…×àé·⌫"}
 
 uart:
   - {id: rs485_uart, tx_pin: GPIO16, rx_pin: GPIO15, baud_rate: 19200, data_bits: 8, parity: NONE, stop_bits: 1}
@@ -737,14 +737,14 @@ lvgl:
               - buttons: [{text: "1"}, {text: "2"}, {text: "3"}]
               - buttons: [{text: "4"}, {text: "5"}, {text: "6"}]
               - buttons: [{text: "7"}, {text: "8"}, {text: "9"}]
-              - buttons: [{text: "Löschen"}, {text: "0"}, {text: "OK"}]
+              - buttons: [{text: "⌫"}, {text: "0"}, {text: "OK"}]
             on_click:
               - lambda: |-
                   id(taste_ok)=false;
                   uint32_t i=lv_buttonmatrix_get_selected_button(id(pin_pad)->obj);
                   if(i==LV_BUTTONMATRIX_BUTTON_NONE)return;
                   const char *t=lv_buttonmatrix_get_button_text(id(pin_pad)->obj,i);
-                  if(strcmp(t,"Löschen")==0)lv_textarea_delete_char(id(pin_feld));
+                  if(strcmp(t,"⌫")==0)lv_textarea_delete_char(id(pin_feld));
                   else if(strcmp(t,"OK")==0)id(taste_ok)=true;
                   else lv_textarea_add_text(id(pin_feld),t);
               - if:
@@ -877,14 +877,14 @@ lvgl:
               - buttons: [{text: "1"}, {text: "2"}, {text: "3"}]
               - buttons: [{text: "4"}, {text: "5"}, {text: "6"}]
               - buttons: [{text: "7"}, {text: "8"}, {text: "9"}]
-              - buttons: [{text: "Löschen"}, {text: "0"}, {text: "OK"}]
+              - buttons: [{text: "⌫"}, {text: "0"}, {text: "OK"}]
             on_click:
               - lambda: |-
                   id(taste_ok)=false;
                   uint32_t i=lv_buttonmatrix_get_selected_button(id(ml_pad)->obj);
                   if(i==LV_BUTTONMATRIX_BUTTON_NONE)return;
                   const char *t=lv_buttonmatrix_get_button_text(id(ml_pad)->obj,i);
-                  if(strcmp(t,"Löschen")==0)lv_textarea_delete_char(id(ml_feld));
+                  if(strcmp(t,"⌫")==0)lv_textarea_delete_char(id(ml_feld));
                   else if(strcmp(t,"OK")==0)id(taste_ok)=true;
                   else lv_textarea_add_text(id(ml_feld),t);
               - if:
