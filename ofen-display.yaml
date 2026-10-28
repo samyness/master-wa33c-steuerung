@@ -106,6 +106,7 @@ globals:
   - {id: letzter_alarm_push, type: int, restore_value: false, initial_value: '0'}
   - {id: raum_push_gesendet, type: bool, restore_value: false, initial_value: 'false'}
   - {id: pin_freigabe_bis, type: uint32_t, restore_value: false, initial_value: '0'}
+  - {id: taste_ok, type: bool, restore_value: false, initial_value: 'false'}
 
 number:
   - platform: template
@@ -119,6 +120,14 @@ number:
     optimistic: true
     initial_value: 20
     web_server: {sorting_group_id: web_bedienung, sorting_weight: 10}
+    # Sofort übernehmen und anzeigen, nicht erst im 30-s-Regeltakt
+    on_value:
+      - lambda: |-
+          auto &d=esphome::ofen_link::display_runtime;
+          if(d.programm_an){d.meldung="Zeitprogramm aktiv – Sollwert kommt aus dem Programm";return;}
+          d.soll_c=x;
+          char b[16];snprintf(b,sizeof(b),"%.1f",x);for(char *c=b;*c;c++)if(*c=='.')*c=',';
+          lv_label_set_text(id(lbl_soll),b);
   - platform: template
     id: absenkung
     name: Absenktemperatur
@@ -457,13 +466,6 @@ lvgl:
       text_color: "${color_text}"
       pressed: {bg_color: "${color_divider}"}
     label: {text_color: "${color_text}"}
-    spinbox:
-      bg_color: "${color_card}"
-      border_color: "${color_border}"
-      border_width: 1
-      radius: 12
-      shadow_width: 0
-      text_color: "${color_text}"
   top_layer:
     widgets:
       - button:
@@ -668,11 +670,74 @@ lvgl:
         - {label: {x: 382, y: 343, text: Abgas, text_font: inter_14, text_color: "${color_secondary}"}}
         - button: {x: 32, y: 400, width: 144, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Zurück}}], on_click: [{lvgl.page.show: uebersicht_seite}]}
     - id: pin_seite
+      on_load: [{lambda: 'lv_textarea_set_text(id(pin_feld),"");lv_label_set_text(id(pin_fehler),"");'}]
       widgets:
         - {label: {x: 32, y: 28, text: Einstellungen, styles: stil_seitentitel}}
         - {label: {x: 32, y: 72, text: PIN EINGEBEN, styles: stil_kacheltitel}}
-        - {spinbox: {id: pin_spin, x: 250, y: 128, width: 300, height: 72, range_from: 0, range_to: 9999, digits: 4, value: 0, text_align: CENTER, text_font: inter_40}}
-        - button: {x: 250, y: 224, width: 300, height: 72, bg_color: "${color_running}", border_width: 0, widgets: [{label: {align: CENTER, text: ÖFFNEN}}], on_click: [{if: {condition: {lambda: 'return lv_spinbox_get_value(id(pin_spin))==(int)id(pin_code).state;'}, then: [{lambda: 'id(pin_freigabe_bis)=millis()+300000UL;'}, {lvgl.page.show: einstellung_seite}]}}]}
+        - textarea:
+            id: pin_feld
+            x: 32
+            y: 120
+            width: 376
+            height: 80
+            one_line: true
+            password_mode: true
+            accepted_chars: "0123456789"
+            max_length: 4
+            text: ""
+            text_font: inter_40
+            text_align: CENTER
+            bg_color: "${color_card}"
+            border_color: "${color_border}"
+            border_width: 1
+            radius: 12
+        - {label: {id: pin_fehler, x: 32, y: 216, width: 376, text: "", text_font: inter_20, text_color: "${color_alarm}"}}
+        - {label: {x: 32, y: 256, width: 376, text: "4-stellige PIN eingeben und OK drücken.", text_font: inter_14, text_color: "${color_secondary}"}}
+        - buttonmatrix:
+            id: pin_pad
+            x: 440
+            y: 72
+            width: 328
+            height: 312
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            pad_row: 10
+            pad_column: 10
+            items:
+              bg_color: "${color_card}"
+              bg_opa: COVER
+              border_color: "${color_border}"
+              border_width: 1
+              radius: 12
+              shadow_width: 0
+              text_color: "${color_text}"
+              text_font: inter_28
+              pressed: {bg_color: "${color_divider}"}
+            rows:
+              - buttons: [{text: "1"}, {text: "2"}, {text: "3"}]
+              - buttons: [{text: "4"}, {text: "5"}, {text: "6"}]
+              - buttons: [{text: "7"}, {text: "8"}, {text: "9"}]
+              - buttons: [{text: "Löschen"}, {text: "0"}, {text: "OK"}]
+            on_click:
+              - lambda: |-
+                  id(taste_ok)=false;
+                  uint32_t i=lv_buttonmatrix_get_selected_button(id(pin_pad)->obj);
+                  if(i==LV_BUTTONMATRIX_BUTTON_NONE)return;
+                  const char *t=lv_buttonmatrix_get_button_text(id(pin_pad)->obj,i);
+                  if(strcmp(t,"Löschen")==0)lv_textarea_delete_char(id(pin_feld));
+                  else if(strcmp(t,"OK")==0)id(taste_ok)=true;
+                  else lv_textarea_add_text(id(pin_feld),t);
+              - if:
+                  condition: {lambda: 'return id(taste_ok);'}
+                  then:
+                    - if:
+                        condition: {lambda: 'return strlen(lv_textarea_get_text(id(pin_feld)))>0&&atoi(lv_textarea_get_text(id(pin_feld)))==(int)id(pin_code).state;'}
+                        then:
+                          - lambda: 'id(pin_freigabe_bis)=millis()+300000UL;lv_textarea_set_text(id(pin_feld),"");lv_label_set_text(id(pin_fehler),"");'
+                          - lvgl.page.show: einstellung_seite
+                        else:
+                          - lambda: 'lv_textarea_set_text(id(pin_feld),"");lv_label_set_text(id(pin_fehler),"Falsche PIN");'
         - button: {x: 32, y: 400, width: 144, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Zurück}}], on_click: [{lvgl.page.show: uebersicht_seite}]}
     - id: einstellung_seite
       on_load: [{if: {condition: {lambda: 'return millis()>id(pin_freigabe_bis);'}, then: [{lvgl.page.show: pin_seite}]}}]
@@ -700,20 +765,7 @@ lvgl:
         - button: {x: 274, y: 112, width: 226, height: 72, styles: stil_ghost, widgets: [{label: {align: CENTER, text: FLAMME LERNEN}}], on_click: [{lambda: 'auto &d=esphome::ofen_link::display_runtime;if(id(ofen_bus).status.state==(long)ofen::State::BETRIEB){d.kal=esphome::ofen_link::DisplayRuntime::KalSchritt::FLAMME;d.kal_start_ms=millis();d.flamme_summe=0;d.flamme_n=0;}'}]}
         - button: {x: 516, y: 112, width: 252, height: 72, styles: stil_ghost, widgets: [{label: {align: CENTER, text: SPRUNGTEST}}], on_click: [{lambda: 'auto &d=esphome::ofen_link::display_runtime;if(id(ofen_bus).status.state==(long)ofen::State::BETRIEB&&millis()-d.betrieb_seit_ms>=3600000UL){d.kal=esphome::ofen_link::DisplayRuntime::KalSchritt::SPRUNG;d.kal_start_ms=millis();d.sprung_n=0;}else d.meldung="Sprungtest erst nach 60 min Betrieb";'}]}
         - {label: {x: 32, y: 216, text: GEMESSENE ÖLMENGE · ML, styles: stil_kacheltitel}}
-        - {spinbox: {id: kal_ml_spin, x: 32, y: 246, width: 180, height: 70, range_from: 0, range_to: 2000, digits: 4, value: 0, text_align: CENTER}}
-        - button:
-            x: 228
-            y: 246
-            width: 220
-            height: 70
-            styles: stil_ghost
-            widgets: [{label: {align: CENTER, text: WERT SPEICHERN}}]
-            on_click:
-              - lambda: |-
-                  auto &d=esphome::ofen_link::display_runtime;if(d.kal!=esphome::ofen_link::DisplayRuntime::KalSchritt::PUMPE||!d.kal_wartet_ml)return;
-                  d.kal_ml[d.kal_stufe]=lv_spinbox_get_value(id(kal_ml_spin));d.kal_stufe++;d.kal_wartet_ml=false;
-                  if(d.kal_stufe<5){d.stufe_start_ms=millis();id(ofen_bus).send_cmd('C',"KAL",std::to_string(lroundf(d.kal_pwm[d.kal_stufe]*1000)));}
-                  else{id(ofen_bus).send_cmd('C',"STOP");d.pumpe_auswerten(id(oeldichte).state);d.kal=esphome::ofen_link::DisplayRuntime::KalSchritt::AUS;d.meldung=std::isnan(d.neu_min_pwm)?"Pumpenmessung nicht plausibel":"Pumpenkennlinie berechnet – ÜBERNEHMEN drücken";}
+        - button: {x: 32, y: 246, width: 416, height: 70, styles: stil_ghost, widgets: [{label: {align: CENTER, text: MENGE EINGEBEN}}], on_click: [{lambda: 'lv_textarea_set_text(id(ml_feld),"");'}, {lvgl.page.show: kal_ml_seite}]}
         - button:
             x: 464
             y: 246
@@ -756,3 +808,70 @@ lvgl:
                     - lambda: 'auto &d=esphome::ofen_link::display_runtime;if(d.start_erlaubt(id(ofen_bus)->status,id(ofen_bus)->status_fresh(5000))){d.kal=esphome::ofen_link::DisplayRuntime::KalSchritt::PUMPE;d.kal_start_ms=d.stufe_start_ms=millis();d.kal_stufe=0;d.kal_wartet_ml=false;id(ofen_bus)->send_cmd(''C'',"KAL","300");}else d.meldung=d.startsperre(id(ofen_bus)->status,id(ofen_bus)->status_fresh(5000));'
                     - lvgl.page.show: kal_seite
         - button: {x: 32, y: 400, width: 144, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Abbrechen}}], on_click: [{lvgl.page.show: kal_seite}]}
+    - id: kal_ml_seite
+      widgets:
+        - {label: {x: 32, y: 28, text: Ölmenge, styles: stil_seitentitel}}
+        - {label: {x: 32, y: 72, text: GEMESSENE MENGE · ML, styles: stil_kacheltitel}}
+        - textarea:
+            id: ml_feld
+            x: 32
+            y: 120
+            width: 376
+            height: 80
+            one_line: true
+            password_mode: false
+            accepted_chars: "0123456789"
+            max_length: 4
+            text: ""
+            text_font: inter_40
+            text_align: CENTER
+            bg_color: "${color_card}"
+            border_color: "${color_border}"
+            border_width: 1
+            radius: 12
+        - {label: {x: 32, y: 216, width: 376, text: "Menge aus dem Messbecher in ml eingeben und OK drücken. Danach startet die nächste Stufe.", text_font: inter_14, text_color: "${color_secondary}"}}
+        - button: {x: 32, y: 400, width: 144, height: 64, styles: stil_ghost, widgets: [{label: {align: CENTER, text: Zurück}}], on_click: [{lvgl.page.show: kal_seite}]}
+        - buttonmatrix:
+            id: ml_pad
+            x: 440
+            y: 72
+            width: 328
+            height: 312
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            pad_row: 10
+            pad_column: 10
+            items:
+              bg_color: "${color_card}"
+              bg_opa: COVER
+              border_color: "${color_border}"
+              border_width: 1
+              radius: 12
+              shadow_width: 0
+              text_color: "${color_text}"
+              text_font: inter_28
+              pressed: {bg_color: "${color_divider}"}
+            rows:
+              - buttons: [{text: "1"}, {text: "2"}, {text: "3"}]
+              - buttons: [{text: "4"}, {text: "5"}, {text: "6"}]
+              - buttons: [{text: "7"}, {text: "8"}, {text: "9"}]
+              - buttons: [{text: "Löschen"}, {text: "0"}, {text: "OK"}]
+            on_click:
+              - lambda: |-
+                  id(taste_ok)=false;
+                  uint32_t i=lv_buttonmatrix_get_selected_button(id(ml_pad)->obj);
+                  if(i==LV_BUTTONMATRIX_BUTTON_NONE)return;
+                  const char *t=lv_buttonmatrix_get_button_text(id(ml_pad)->obj,i);
+                  if(strcmp(t,"Löschen")==0)lv_textarea_delete_char(id(ml_feld));
+                  else if(strcmp(t,"OK")==0)id(taste_ok)=true;
+                  else lv_textarea_add_text(id(ml_feld),t);
+              - if:
+                  condition: {lambda: 'return id(taste_ok);'}
+                  then:
+                    - lambda: |-
+                        auto &d=esphome::ofen_link::display_runtime;if(d.kal!=esphome::ofen_link::DisplayRuntime::KalSchritt::PUMPE||!d.kal_wartet_ml)return;
+                        d.kal_ml[d.kal_stufe]=atoi(lv_textarea_get_text(id(ml_feld)));d.kal_stufe++;d.kal_wartet_ml=false;
+                        if(d.kal_stufe<5){d.stufe_start_ms=millis();id(ofen_bus).send_cmd('C',"KAL",std::to_string(lroundf(d.kal_pwm[d.kal_stufe]*1000)));}
+                        else{id(ofen_bus).send_cmd('C',"STOP");d.pumpe_auswerten(id(oeldichte).state);d.kal=esphome::ofen_link::DisplayRuntime::KalSchritt::AUS;d.meldung=std::isnan(d.neu_min_pwm)?"Pumpenmessung nicht plausibel":"Pumpenkennlinie berechnet – ÜBERNEHMEN drücken";}
+                    - lvgl.page.show: kal_seite
